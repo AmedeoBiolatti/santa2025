@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 
 from santa.core import Problem
@@ -17,28 +18,15 @@ def objective_fn(solution):
     return score
 
 
-def get_init_solution_fn(num_trees):
-    def init_solution():
-        params = jnp.zeros((num_trees, 2)), jnp.zeros((num_trees,))
-        return to_solution(params)
-
-    return init_solution
-
-
-def to_solution(params):
-    return TreePackingSolution(params)
-
-
 def create_tree_packing_problem(
-        num_trees: int,
+        *,
         intersection_version: int = 2
 ):
-    n = 16
-    side = n * tree.THR
+    side = 16 * tree.THR
     if intersection_version == 1:
         intersection_constraint = constraints.IntersectionConstraint()
     elif intersection_version == 2:
-        intersection_constraint = constraints.IntersectionConstraintV2(n=n, capacity=8)
+        intersection_constraint = constraints.IntersectionConstraintV2()
     else:
         raise ValueError(f"Invalid intersection version: {intersection_version}")
 
@@ -47,8 +35,7 @@ def create_tree_packing_problem(
         constraints={
             "intersection": intersection_constraint,
             "bounds": constraints.BoundConstraint(min_pos=-side / 2, max_pos=side / 2),
-        }
+        },
+        solution_cls=TreePackingSolution
     )
-    problem.init_solution = get_init_solution_fn(num_trees)
-    problem.to_solution = to_solution
     return problem

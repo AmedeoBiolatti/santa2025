@@ -29,10 +29,11 @@ class Grid2D:
         return self.ij2k.shape[2]
 
     def compute_ij(self, points: jax.Array) -> jax.Array:
+        is_nan = jnp.isnan(points).any(-1, keepdims=True)
         n_half = self.n // 2
         points = points - self.center
         ij = (jnp.clip(points // self.size, -n_half, n_half - 1) + n_half).astype(jnp.uint16)
-        return ij + 1
+        return (ij + 1) * (~is_nan)
 
     @staticmethod
     def empty(num, n=20, size=1.04, capacity=16, center=0.0, dtype=int):
@@ -50,7 +51,7 @@ class Grid2D:
         )
 
     @staticmethod
-    def init(centers: jax.Array, *, n=20, capacity=16, size=1.04, center=0.0) -> Grid2D:
+    def init(centers: jax.Array, *, n=16, capacity=8, size=1.04, center=0.0) -> Grid2D:
         num = centers.shape[0]
         grid = Grid2D.empty(num, n=n, size=size, capacity=capacity, center=center)
         ij = grid.compute_ij(centers)
@@ -97,5 +98,12 @@ class Grid2D:
         candidates = jax.vmap(lambda delta: self.ij2k[*(ij + delta)])(_deltas)
         candidates = candidates.ravel()
         candidates = jnp.where(candidates == k, -1, candidates)
+        candidates = jnp.sort(candidates, descending=True)
+        return candidates
+
+    def propose_candidates_by_pos(self, pos: jax.Array) -> jax.Array:
+        ij = self.compute_ij(pos)
+        candidates = jax.vmap(lambda delta: self.ij2k[*(ij + delta)])(_deltas)
+        candidates = candidates.ravel()
         candidates = jnp.sort(candidates, descending=True)
         return candidates

@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-from santa.core import Constraint, ConstraintEval, Solution
+from santa.core import Constraint, ConstraintEval, SolutionEval
+from santa.tree_packing.solution import TreePackingSolution
 from santa.tree_packing.grid import Grid2D
 from santa.tree_packing.intersection import figure_intersection_score
 from santa.tree_packing import tree
@@ -12,7 +13,7 @@ _figure_intersection_score_matrix = jax.vmap(_figure_intersection_score_matrix, 
 
 
 class IntersectionConstraint(Constraint):
-    def eval(self, solution: Solution) -> ConstraintEval:
+    def eval(self, solution: TreePackingSolution) -> ConstraintEval:
         trees = tree.params_to_trees(solution.params)
         matrix = _figure_intersection_score_matrix(trees, trees)
         matrix = jnp.fill_diagonal(matrix, 0, inplace=False)
@@ -23,7 +24,7 @@ class IntersectionConstraint(Constraint):
             aux_data={"matrix": matrix}
         )
 
-    def eval_update(self, solution: Solution, prev_eval: ConstraintEval, indexes) -> ConstraintEval:
+    def eval_update(self, solution: TreePackingSolution, _, prev_eval: ConstraintEval, indexes) -> ConstraintEval:
         if indexes.ndim == 0:
             indexes = jax.numpy.expand_dims(indexes, 0)
 
@@ -43,38 +44,29 @@ class IntersectionConstraint(Constraint):
 
 
 class IntersectionConstraintV2(Constraint):
-    def __init__(self, n=20, capacity=16):
-        self.n = n
-        self.capacity = capacity
-
-    def eval(self, solution: Solution) -> ConstraintEval:
-        from santa.tree_packing.grid import Grid2D
-
-        trees = tree.params_to_trees(solution.params)
+    def eval(self, solution: TreePackingSolution) -> ConstraintEval:
+        trees = solution.trees
         matrix = _figure_intersection_score_matrix(trees, trees)
         matrix = jnp.fill_diagonal(matrix, 0, inplace=False)
         matrix = jnp.maximum(matrix, matrix.T)
         matrix = jnp.pad(matrix, ((0, 1), (0, 1)), constant_values=0)
+        return ConstraintEval(violation=matrix.sum(), aux_data={"matrix": matrix})
 
-        centers = tree.get_tree_centers(solution.params)
-
-        return ConstraintEval(
-            violation=matrix.sum(),
-            aux_data={
-                "matrix": matrix,
-                "grid": Grid2D.init(centers, size=tree.THR, n=self.n, capacity=self.capacity)
-            }
-        )
-
-    def eval_update(self, solution: Solution, prev_eval: ConstraintEval, indexes) -> ConstraintEval:
+    def eval_update(
+            self,
+            solution: TreePackingSolution,
+            prev_sol: SolutionEval,
+            prev_eval: ConstraintEval,
+            indexes
+    ) -> ConstraintEval:
         if indexes.ndim == 0:
             indexes = jax.numpy.expand_dims(indexes, 0)
 
         matrix = prev_eval.aux_data["matrix"]
-        grid: Grid2D = prev_eval.aux_data["grid"]
+        old_grid: Grid2D = prev_sol.aux_data["grid"]
 
         # set to zero
-        def update(matrix, i):
+        def update_to_zero(matrix, i):
             def cond(carry):
                 matrix, j = carry
                 return (j < candidates.shape[0]) & (candidates[j] >= 0)
@@ -85,17 +77,16 @@ class IntersectionConstraintV2(Constraint):
                 matrix = matrix.at[[i, c], [c, i]].set(0.0)
                 return matrix, j + 1
 
-            candidates = grid.propose_candidates(i)
+            candidates = old_grid.propose_candidates(i)
             matrix, j = jax.lax.while_loop(cond, body, (matrix, 0))
             return matrix, None
 
-        matrix, _ = jax.lax.scan(update, matrix, indexes)
+        matrix, _ = jax.lax.scan(update_to_zero, matrix, indexes)
 
         # update structures
-        trees = tree.params_to_trees(solution.params)
-        centers = tree.get_tree_centers(solution.params)
-        for i in indexes:
-            grid = grid.update(centers, i)
+        trees = solution.trees
+        centers = solution.centers
+        grid = solution.aux_data["grid"]
 
         # compute distance for candidates
         def update(matrix, i):
@@ -133,13 +124,7 @@ class IntersectionConstraintV2(Constraint):
 
         matrix, _ = jax.lax.scan(update, matrix, indexes)
 
-        return ConstraintEval(
-            violation=matrix.sum(),
-            aux_data={
-                "matrix": matrix,
-                "grid": grid
-            }
-        )
+        return ConstraintEval(violation=matrix.sum(), aux_data={"matrix": matrix})
 
 
 class BoundConstraint(Constraint):
@@ -147,7 +132,7 @@ class BoundConstraint(Constraint):
         self.min_pos = min_pos
         self.max_pos = max_pos
 
-    def eval(self, solution: Solution) -> ConstraintEval:
+    def eval(self, solution: TreePackingSolution) -> ConstraintEval:
         pos, ang = solution.params
 
         r = jax.nn.relu(pos - self.max_pos).sum()
@@ -157,5 +142,5 @@ class BoundConstraint(Constraint):
             violation=r + l,
         )
 
-    def eval_update(self, solution: Solution, prev_eval: ConstraintEval, indexes) -> ConstraintEval:
+    def eval_update(self, solution: TreePackingSolution, *args) -> ConstraintEval:
         return self.eval(solution)
