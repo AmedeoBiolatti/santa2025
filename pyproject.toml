@@ -1,0 +1,21 @@
+[project]
+name = "santa2025"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.11"
+dependencies = [
+    "flax>=0.12.2",
+    "ipykernel>=7.1.0",
+    "jax[cuda]>=0.8.2",
+    "matplotlib>=3.10.8",
+    "optax>=0.2.6",
+    "pandas>=2.3.3",
+    "pandas-stubs~=2.3.3",
+    "shapely>=2.1.2",
+    "tqdm>=4.67.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
