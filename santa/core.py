@@ -18,7 +18,13 @@ class Constraint:
     def eval(self, solution: Solution) -> ConstraintEval:
         raise NotImplementedError()
 
-    def eval_update(self, solution: Solution, prev_eval: ConstraintEval, indexes) -> ConstraintEval:
+    def eval_update(
+            self,
+            solution: Solution,
+            prev_sol: Solution | SolutionEval,
+            prev_eval: ConstraintEval,
+            indexes
+    ) -> ConstraintEval:
         class_name = self.__class__.__name__
         print("eval_update not implemented for class '%s', fallback :(" % class_name)
         return self.eval(solution)
@@ -39,6 +45,17 @@ class Solution:
     def reg(self) -> float:
         return 0.0
 
+    @staticmethod
+    def init(params, *args, **kwargs) -> Solution:
+        return Solution(params)
+
+    def update(self, params, indicies: jax.Array) -> Solution:
+        return Solution(params)
+
+    @staticmethod
+    def init_params(*args, **kwargs):
+        raise NotImplementedError
+
 
 @dataclass
 class SolutionEval:
@@ -49,6 +66,10 @@ class SolutionEval:
     @property
     def params(self):
         return self.solution.params
+
+    @property
+    def aux_data(self):
+        return self.solution.aux_data
 
     def n_missing(self) -> int:
         return self.solution.n_missing()
@@ -115,10 +136,12 @@ class GlobalState:
 class Problem:
     objective_fn: Callable
     constraints: dict[str, Constraint]
+    solution_cls: type[Solution] = Solution
 
-    def __init__(self, objective_fn: Any, constraints: dict[str, Constraint]) -> None:
+    def __init__(self, objective_fn: Any, constraints: dict[str, Constraint], solution_cls=Solution) -> None:
         self.objective_fn = objective_fn
         self.constraints = constraints
+        self.solution_cls = solution_cls
 
     def eval(self, solution: Solution) -> SolutionEval:
         if isinstance(solution, SolutionEval):
@@ -134,7 +157,7 @@ class Problem:
     def eval_update(self, solution: Solution, prev_solution: SolutionEval, indexes) -> SolutionEval:
         objective = self.objective_fn(solution)
         constraints = {
-            k: c.eval_update(solution, prev_solution.constraints[k], indexes)
+            k: c.eval_update(solution, prev_solution, prev_solution.constraints[k], indexes)
             for k, c in self.constraints.items()
         }
         return SolutionEval(
@@ -149,20 +172,23 @@ class Problem:
         reg = solution.reg()
         return solution.objective + global_state.mu * violation + 1.0 * n_missing + 1e-6 * reg
 
-    def init_solution(self):
-        raise NotImplementedError()
+    def init_solution(self, *args, **kwargs):
+        params = self.solution_cls.init_params(*args, **kwargs)
+        return self.solution_cls.init(params)
 
     def to_solution(self, params: Any) -> Solution:
-        return Solution(params=params)
+        return self.solution_cls.init(params)
 
-    def to_solution_update(self, params: Any, prev_solution: SolutionEval, indexes: jax.Array) -> Solution:
-        return self.to_solution(params)
+    def to_solution_update(self, params: Any, prev_solution: Solution | SolutionEval, indicies: jax.Array) -> Solution:
+        if isinstance(prev_solution, SolutionEval):
+            prev_solution = prev_solution.solution
+        return prev_solution.update(params, indicies)
 
-    def init_global_state(self, seed: int) -> GlobalState:
-        solution = self.eval(self.init_solution())
+    def init_global_state(self, seed: int, *args, **kwargs) -> GlobalState:
+        solution = self.eval(self.init_solution(*args, **kwargs))
         return GlobalState(
             t=jnp.zeros(0, dtype=jnp.uint32),
-            rng=jax.random.PRNGKey(seed),
+            rng=jax.random.PRNGKey(seed) if isinstance(seed, int) else seed,
             best_solution=solution,
             best_feasible_solution=solution,
             iters_since_last_improvement=jnp.zeros((), dtype=jnp.uint32),
