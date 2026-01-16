@@ -35,7 +35,7 @@ class RandomRuin(Optimizer):
 
         indices = self._select_indices(pos.shape[0], idx_rng)
         new_pos = self._set_positions_zero(pos, indices)
-        new_solution = Solution((new_pos, ang))
+        new_solution = self.problem.to_solution_update((new_pos, ang), solution, indices)
         new_solution = self.problem.eval_update(new_solution, solution, indexes=indices)
 
         return new_solution, state
@@ -87,6 +87,6 @@ class SpatialRuin(Optimizer):
         pos, ang = solution.params
         indices = self._select_indices(pos, rng)
         new_pos = self._set_positions_zero(pos, indices)
-        new_solution = Solution((new_pos, ang))
+        new_solution = self.problem.to_solution_update((new_pos, ang), solution, indices)
         new_solution = self.problem.eval_update(new_solution, solution, indexes=indices)
         return new_solution, state

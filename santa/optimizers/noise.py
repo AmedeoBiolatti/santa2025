@@ -28,8 +28,9 @@ class NoiseOptimizer(Optimizer):
 
         new_pos = pos.at[idx].add(pos_noise)
         new_ang = ang.at[idx].add(ang_noise)
+        new_params = new_pos, new_ang
 
-        new_solution = Solution((new_pos, new_ang))
+        new_solution = self.problem.to_solution(new_params)
 
         # evaluate new_solution
         new_solution = self.problem.eval_update(new_solution, solution, indexes=idx)
@@ -38,7 +39,7 @@ class NoiseOptimizer(Optimizer):
 
 
 class BisectionNoiseOptimizer(Optimizer):
-    def __init__(self, noise_level: float = 0.01, n_steps: int = 5):
+    def __init__(self, noise_level: float = 0.01, n_steps: int = 4):
         super(BisectionNoiseOptimizer, self).__init__()
         self.noise_level = noise_level
         self.n_steps = n_steps
@@ -66,21 +67,21 @@ class BisectionNoiseOptimizer(Optimizer):
         def _evaluate(alpha: jax.Array) -> SolutionEval:
             new_pos = pos.at[idx].add(alpha * pos_noise)
             new_ang = ang.at[idx].add(alpha * ang_noise)
-            new_solution = Solution((new_pos, new_ang))
+            new_solution = self.problem.to_solution((new_pos, new_ang))
             return self.problem.eval_update(new_solution, solution, indexes=idx)
 
         low_alpha = jnp.array(0.0)
         high_alpha = jnp.array(1.0)
         low_solution = solution
-        low_score = global_state.score(low_solution)
+        low_score = self.problem.score(low_solution, global_state)
         high_solution = _evaluate(high_alpha)
-        high_score = global_state.score(high_solution)
+        high_score = self.problem.score(high_solution, global_state)
 
         def body(_, carry):
             low_alpha, high_alpha, low_solution, high_solution, low_score, high_score = carry
             mid_alpha = (low_alpha + high_alpha) / 2.0
             mid_solution = _evaluate(mid_alpha)
-            mid_score = global_state.score(mid_solution)
+            mid_score = self.problem.score(mid_solution, global_state)
 
             compare_low = low_score <= high_score
             keep_left = (compare_low & (mid_score < low_score)) | (~compare_low & (mid_score >= high_score))

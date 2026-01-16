@@ -76,7 +76,7 @@ class RandomRecreate(Optimizer):
         )
         new_ang = jnp.where(target_mask, random_ang, ang)
 
-        new_solution = Solution((new_pos, new_ang))
+        new_solution = self.problem.to_solution_update((new_pos, new_ang), solution, indices)
         new_solution = self.problem.eval_update(new_solution, solution, indexes=indices)
 
         new_state = {"iteration": state["iteration"] + 1}

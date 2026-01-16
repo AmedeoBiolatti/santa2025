@@ -32,6 +32,13 @@ class Solution:
     params: Any
     aux_data: dict[str, Any] | None = None
 
+    def n_missing(self) -> int:
+        n_nan = jax.tree.reduce(jax.numpy.add, jax.tree.map(jax.numpy.sum, jax.tree.map(jax.numpy.isnan, self.params)))
+        return n_nan
+
+    def reg(self) -> float:
+        return 0.0
+
 
 @dataclass
 class SolutionEval:
@@ -42,6 +49,12 @@ class SolutionEval:
     @property
     def params(self):
         return self.solution.params
+
+    def n_missing(self) -> int:
+        return self.solution.n_missing()
+
+    def reg(self):
+        return self.solution.reg()
 
     def total_violation(self):
         return sum([v.violation for v in self.constraints.values()])
@@ -71,12 +84,9 @@ class GlobalState:
             iters_since_last_feasible_improvement=self.iters_since_last_feasible_improvement + 1,
         )
 
-    def score(self, solution: SolutionEval) -> jax.Array:
-        return solution.objective + self.mu * solution.total_violation()
-
-    def maybe_update_best(self, solution: SolutionEval) -> GlobalState:
+    def maybe_update_best(self, problem: Problem, solution: SolutionEval) -> GlobalState:
         is_feasible = solution.total_violation() < self.tol
-        score = self.score(solution)
+        score = problem.score(solution, self)
         improved = score < self.best_score
         feasible_improved = is_feasible & (score < self.best_feasible_score)
         best_solution, best_score = jax.lax.cond(
@@ -133,8 +143,20 @@ class Problem:
             constraints=constraints
         )
 
+    def score(self, solution: SolutionEval, global_state: GlobalState) -> jax.Array:
+        violation = solution.total_violation()
+        n_missing = solution.n_missing()
+        reg = solution.reg()
+        return solution.objective + global_state.mu * violation + 1.0 * n_missing + 1e-6 * reg
+
     def init_solution(self):
         raise NotImplementedError()
+
+    def to_solution(self, params: Any) -> Solution:
+        return Solution(params=params)
+
+    def to_solution_update(self, params: Any, prev_solution: SolutionEval, indexes: jax.Array) -> Solution:
+        return self.to_solution(params)
 
     def init_global_state(self, seed: int) -> GlobalState:
         solution = self.eval(self.init_solution())
@@ -172,7 +194,7 @@ class Optimizer:
     ) -> tuple[SolutionEval, Any, GlobalState]:
         global_state, rng = global_state.split_rng()
         solution, state = self.apply(solution, state, global_state, rng)
-        global_state = global_state.maybe_update_best(solution)
+        global_state = global_state.maybe_update_best(self.problem, solution)
         solution = self.problem.eval(solution)
         return solution, state, global_state
 

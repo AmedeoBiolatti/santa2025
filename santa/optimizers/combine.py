@@ -217,7 +217,7 @@ class Parallel(Optimizer):
             candidates.append(cand_solution)
             new_states.append(cand_state)
 
-        scores = jnp.stack([global_state.score(sol) for sol in candidates])
+        scores = jnp.stack([self.problem.score(sol, global_state) for sol in candidates])
         best_idx = jnp.argmin(scores)
         branches = [lambda c=c: c for c in candidates]
         best_solution = jax.lax.switch(best_idx, branches)
@@ -256,7 +256,54 @@ class Vmap(Optimizer):
 
         candidates, candidate_states = jax.vmap(apply_once)(rngs)
         candidates = jax.vmap(self.problem.eval)(candidates)
-        scores = jax.vmap(global_state.score)(candidates)
+        scores = jax.vmap(lambda sol: self.problem.score(sol, global_state))(candidates)
+        best_idx = jnp.argmin(scores)
+        new_solution, new_state = jax.tree.map(lambda t: t[best_idx], (candidates, candidate_states))
+        return new_solution, new_state
+
+
+class Pmap(Optimizer):
+    def __init__(self, optimizer: Optimizer, n: int | None = None):
+        super(Pmap, self).__init__()
+        if n is None:
+            n = jax.local_device_count()
+        if n <= 0:
+            raise ValueError("n must be >= 1")
+        device_count = jax.local_device_count()
+        if n > device_count:
+            raise ValueError(f"n must be <= local_device_count ({device_count})")
+        self.optimizer = optimizer
+        self.n = int(n)
+        self.devices = jax.local_devices()[:self.n]
+
+    def set_problem(self, problem):
+        super().set_problem(problem)
+        self.optimizer.set_problem(problem)
+
+    def init_state(self, solution: Solution | SolutionEval) -> Any:
+        return self.optimizer.init_state(solution)
+
+    def apply(
+            self,
+            solution: SolutionEval,
+            state: Any,
+            global_state: GlobalState,
+            rng: jax.Array,
+    ) -> tuple[Solution | SolutionEval, Any]:
+        if self.n == 1:
+            return self.optimizer.apply(solution, state, global_state, rng)
+
+        if rng is None:
+            raise ValueError("Pmap requires rng")
+        rngs = jax.random.split(rng, self.n)
+
+        def apply_once(step_rng):
+            new_solution, new_state = self.optimizer.apply(solution, state, global_state, step_rng)
+            new_score = self.problem.score(new_solution, global_state)
+            return new_solution, new_state, new_score
+
+        candidates, candidate_states, scores = jax.pmap(apply_once, devices=self.devices)(rngs)
+
         best_idx = jnp.argmin(scores)
         new_solution, new_state = jax.tree.map(lambda t: t[best_idx], (candidates, candidate_states))
         return new_solution, new_state

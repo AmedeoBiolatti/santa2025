@@ -102,8 +102,8 @@ class AdaptiveLargeNeighborhoodSearch(Optimizer):
             )
 
             recreated_solution = self.problem.eval(recreated_solution)
-            current_score = global_state.score(solution)
-            new_score = global_state.score(recreated_solution)
+            current_score = self.problem.score(solution, global_state)
+            new_score = self.problem.score(recreated_solution, global_state)
             improved = new_score < current_score
             reward = jax.lax.cond(
                 improved,
@@ -201,8 +201,8 @@ class AdaptiveLargeNeighborhoodSearch(Optimizer):
         ) = jax.lax.switch(mode_idx, [apply_ruin_recreate, apply_full], None)
 
         new_solution = self.problem.eval(new_solution)
-        current_score = global_state.score(solution)
-        new_score = global_state.score(new_solution)
+        current_score = self.problem.score(solution, global_state)
+        new_score = self.problem.score(new_solution, global_state)
         improved = new_score < current_score
         reward = jax.lax.cond(
             improved,

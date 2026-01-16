@@ -83,8 +83,8 @@ class SimulatedAnnealing(Optimizer):
         )
         candidate_solution = self.problem.eval(candidate_solution)
 
-        current_score = global_state.score(solution)
-        candidate_score = global_state.score(candidate_solution)
+        current_score = self.problem.score(solution, global_state)
+        candidate_score = self.problem.score(candidate_solution, global_state)
         delta = candidate_score - current_score
 
         temperature, iteration, counter = self._compute_temperature(state, global_state)
