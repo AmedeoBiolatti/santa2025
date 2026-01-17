@@ -15,11 +15,10 @@ class RandomRuin(Optimizer):
         perm = jax.random.permutation(rng, n_trees)
         return perm[: self.n_remove]
 
-    def _set_positions_zero(self, pos: jax.Array, indices: jax.Array) -> jax.Array:
+    def _set_positions_nan(self, pos: jax.Array, indices: jax.Array) -> jax.Array:
         def body(i, current_pos):
             idx = indices[i]
-            zero = jnp.zeros_like(current_pos[idx])
-            return current_pos.at[idx].set(zero)
+            return current_pos.at[idx].set(jnp.nan)
 
         return jax.lax.fori_loop(0, indices.shape[0], body, pos)
 
@@ -34,7 +33,7 @@ class RandomRuin(Optimizer):
         pos, ang = solution.params
 
         indices = self._select_indices(pos.shape[0], idx_rng)
-        new_pos = self._set_positions_zero(pos, indices)
+        new_pos = self._set_positions_nan(pos, indices)
         new_solution = self.problem.to_solution_update((new_pos, ang), solution, indices)
         new_solution = self.problem.eval_update(new_solution, solution, indexes=indices)
 
@@ -69,11 +68,10 @@ class SpatialRuin(Optimizer):
         sorted_indices = jnp.argsort(sq_distances)
         return sorted_indices[: self.n_remove]
 
-    def _set_positions_zero(self, pos: jax.Array, indices: jax.Array) -> jax.Array:
+    def _set_positions_nan(self, pos: jax.Array, indices: jax.Array) -> jax.Array:
         def body(i, current_pos):
             idx = indices[i]
-            zero = jnp.zeros_like(current_pos[idx])
-            return current_pos.at[idx].set(zero)
+            return current_pos.at[idx].set(jnp.nan)
 
         return jax.lax.fori_loop(0, indices.shape[0], body, pos)
 

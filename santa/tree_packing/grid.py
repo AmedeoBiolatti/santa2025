@@ -28,6 +28,9 @@ class Grid2D:
     def capacity(self):
         return self.ij2k.shape[2]
 
+    def get_cell_centers(self, ij):
+        return self.size / 2 + ij * self.size
+
     def compute_ij(self, points: jax.Array) -> jax.Array:
         is_nan = jnp.isnan(points).any(-1, keepdims=True)
         n_half = self.n // 2
