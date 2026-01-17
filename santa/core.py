@@ -132,6 +132,63 @@ class GlobalState:
             iters_since_last_feasible_improvement=iters_since_last_feasible_improvement,
         )
 
+    def _format_array(self, value) -> str | int | float | Any:
+        value = jax.device_get(value)
+        if hasattr(value, "shape") and value.shape == ():
+            scalar = value.item()
+            if isinstance(scalar, Integral):
+                return int(scalar)
+            if isinstance(scalar, float):
+                return float(scalar)
+            return scalar
+        return f"Array(shape={value.shape}, dtype={value.dtype})"
+
+    def _format_value(self, value) -> str | int | float | Any:
+        if isinstance(value, jax.Array):
+            return self._format_array(value)
+        if hasattr(value, "shape") and hasattr(value, "dtype"):
+            return self._format_array(value)
+        if isinstance(value, Integral):
+            return int(value)
+        if isinstance(value, float):
+            return float(value)
+        return value
+
+    def _solution_summary(self, solution: SolutionEval | None) -> str:
+        if solution is None:
+            return "None"
+        objective = self._format_value(solution.objective)
+        violation = self._format_value(solution.total_violation())
+        missing = self._format_value(solution.n_missing())
+        return f"SolutionEval(objective={objective}, violation={violation}, missing={missing})"
+
+    def pretty(self) -> str:
+        t = self._format_value(self.t)
+        rng = self._format_value(self.rng)
+        best_score = self._format_value(self.best_score)
+        best_feasible_score = self._format_value(self.best_feasible_score)
+        iters_since_last_improvement = self._format_value(self.iters_since_last_improvement)
+        iters_since_last_feasible_improvement = self._format_value(self.iters_since_last_feasible_improvement)
+        mu = self._format_value(self.mu)
+        tol = self._format_value(self.tol)
+        best_solution = self._solution_summary(self.best_solution)
+        best_feasible_solution = self._solution_summary(self.best_feasible_solution)
+        return (
+            "GlobalState(\n"
+            f"  t={t}, rng={rng},\n"
+            f"  best_score={best_score}, best_feasible_score={best_feasible_score},\n"
+            f"  iters_since_last_improvement={iters_since_last_improvement}, "
+            f"iters_since_last_feasible_improvement={iters_since_last_feasible_improvement},\n"
+            f"  mu={mu}, tol={tol},\n"
+            ")"
+        )
+
+    def __str__(self) -> str:
+        return self.pretty()
+
+    def __repr__(self) -> str:
+        return self.pretty()
+
 
 class Problem:
     objective_fn: Callable
@@ -184,8 +241,17 @@ class Problem:
             prev_solution = prev_solution.solution
         return prev_solution.update(params, indicies)
 
-    def init_global_state(self, seed: int, *args, **kwargs) -> GlobalState:
-        solution = self.eval(self.init_solution(*args, **kwargs))
+    def init_global_state(
+            self,
+            seed: int,
+            solution: Solution | SolutionEval | None = None,
+            *args,
+            **kwargs
+    ) -> GlobalState:
+        if solution is None:
+            solution = self.init_solution(*args, **kwargs)
+        if not isinstance(solution, SolutionEval):
+            solution = self.eval_update(solution)
         return GlobalState(
             t=jnp.zeros(0, dtype=jnp.uint32),
             rng=jax.random.PRNGKey(seed) if isinstance(seed, int) else seed,
