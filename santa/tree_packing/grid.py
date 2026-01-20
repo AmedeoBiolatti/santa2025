@@ -30,6 +30,22 @@ def compute_figures_aabb_area(figures, aabb_grid):
     return areas
 
 
+def pseudo_sort(x):
+    sorted = jnp.zeros_like(x) - 1
+    k = 0
+
+    def step(carry, xi):
+        sorted, k = carry
+
+        sorted = sorted.at[k].set(xi)
+        k = k + (xi >= 0)
+
+        carry = sorted, k
+        return carry, None
+
+    (sorted, k), _ = jax.lax.scan(step, (sorted, k), xs=x)
+    return sorted
+
 @dataclass
 class Grid2D:
     """
@@ -157,21 +173,21 @@ class Grid2D:
         candidates = jax.vmap(lambda delta: self.ij2k[*(ij + delta)])(_deltas)
         candidates = candidates.ravel()
         candidates = jnp.where(candidates == k, -1, candidates)
-        candidates = jnp.sort(candidates, descending=True)
+        candidates = pseudo_sort(candidates)
         return candidates
 
     def propose_candidates_by_pos(self, pos: jax.Array) -> jax.Array:
         ij = self.compute_ij(pos)
         candidates = jax.vmap(lambda delta: self.ij2k[*(ij + delta)])(_deltas)
         candidates = candidates.ravel()
-        candidates = jnp.sort(candidates, descending=True)
+        candidates = pseudo_sort(candidates)
         return candidates
 
     def propose_candidates_by_cell(self, i, j):
         ij = jnp.array([i, j])
         candidates = jax.vmap(lambda delta: self.ij2k[*(ij + delta)])(_deltas)
         candidates = candidates.ravel()
-        candidates = jnp.sort(candidates, descending=True)
+        candidates = pseudo_sort(candidates)
         return candidates
 
     def compute_cell_aabb(self, i, j) -> jax.Array:

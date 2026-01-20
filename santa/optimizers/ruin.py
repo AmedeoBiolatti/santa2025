@@ -65,8 +65,11 @@ class SpatialRuin(Optimizer):
         diff = pos - point
         sq_distances = jnp.sum(diff ** 2, axis=1)
         sq_distances = jnp.where(jnp.isnan(sq_distances), jnp.inf, sq_distances)
+        if self.n_remove == 1:
+            idx = jnp.argmin(sq_distances)
+            return jnp.expand_dims(idx, 0)
         sorted_indices = jnp.argsort(sq_distances)
-        return sorted_indices[: self.n_remove]
+        return sorted_indices[:self.n_remove]
 
     def _set_positions_nan(self, pos: jax.Array, indices: jax.Array) -> jax.Array:
         def body(i, current_pos):

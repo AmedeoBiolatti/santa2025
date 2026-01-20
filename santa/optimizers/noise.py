@@ -30,7 +30,7 @@ class NoiseOptimizer(Optimizer):
         new_ang = ang.at[idx].add(ang_noise)
         new_params = new_pos, new_ang
 
-        new_solution = self.problem.to_solution(new_params)
+        new_solution = self.problem.to_solution_update(new_params, solution, indicies=jnp.reshape(idx, (1,)))
 
         # evaluate new_solution
         new_solution = self.problem.eval_update(new_solution, solution, indexes=idx)
@@ -67,7 +67,8 @@ class BisectionNoiseOptimizer(Optimizer):
         def _evaluate(alpha: jax.Array) -> SolutionEval:
             new_pos = pos.at[idx].add(alpha * pos_noise)
             new_ang = ang.at[idx].add(alpha * ang_noise)
-            new_solution = self.problem.to_solution((new_pos, new_ang))
+            new_params = (new_pos, new_ang)
+            new_solution = self.problem.to_solution_update(new_params, solution, indicies=jnp.reshape(idx, (1,)))
             return self.problem.eval_update(new_solution, solution, indexes=idx)
 
         low_alpha = jnp.array(0.0)

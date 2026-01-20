@@ -3,11 +3,15 @@ import jax.numpy as jnp
 
 
 def _edge_normals(tri):
+    assert tri.shape == (3, 2), f"tri must be (3,2), it is {tri.shape} instead"
     # tri: (3, 2)
     tri_next = jnp.roll(tri, shift=-1, axis=0)
     edges = tri_next - tri
     # Perpendiculars (normals); normalization is unnecessary for SAT.
-    return jnp.stack([-edges[:, 1], edges[:, 0]], axis=1)
+    normals = jnp.stack([-edges[:, 1], edges[:, 0]], axis=1)
+    norm = (1e-12 + jnp.sum(normals ** 2, 1, keepdims=True)) ** 0.5
+    normals = normals / (1e-12 + norm)
+    return normals
 
 
 def triangles_intersect(t0, t1, eps=1e-12):
@@ -36,7 +40,10 @@ def triangles_intersection_score(t0, t1, eps=1e-12):
     - positive when triangles overlap,
     - <= 0 when separated or only touching.
     """
-    axes = jnp.concatenate([_edge_normals(t0), _edge_normals(t1)], axis=0)  # (6, 2)
+    n0 = _edge_normals(t0)
+    n1 = _edge_normals(t1)
+
+    axes = jnp.concatenate([n0, n1], axis=0)  # (6, 2)
 
     proj0 = t0 @ axes.T
     proj1 = t1 @ axes.T
@@ -55,11 +62,13 @@ _figure_intersection_score = jax.vmap(_figure_intersection_score, (0, None, None
 _figure_intersection_score = jax.vmap(_figure_intersection_score, (None, 0, None))
 
 
-def figure_intersection_score(t0, t1, eps=1e-12):
+def figure_intersection_score(t0, t1, eps=1e-12, allow_negative=False, reduce=True):
     """
     Given two figures (each figure is a union of triangles)
     """
     score = _figure_intersection_score(t0, t1, eps)
-    score = jax.nn.relu(score)
-    score = jax.numpy.sum(score)
+    if not allow_negative:
+        score = jax.nn.relu(score)
+    if reduce:
+        score = jax.numpy.sum(score)
     return score

@@ -2,6 +2,7 @@ import jax.numpy as jnp
 
 from decimal import Decimal, getcontext
 
+import matplotlib.pyplot as plt
 from shapely import affinity
 from shapely.geometry import Polygon
 from shapely.strtree import STRtree
@@ -74,6 +75,34 @@ class ChristmasTree:
         return self.center_x, self.center_y, self.angle
 
 
+def plot_tree(params: tuple, color=None, ax=None, alpha=1.0):
+    import numpy as np
+
+    pos, ang = params
+    tree = ChristmasTree(
+        center_x=str(float(pos[0])),
+        center_y=str(float(pos[1])),
+        angle=str(float(ang / np.pi * 180.))
+    )
+
+    x_scaled, y_scaled = tree.polygon.exterior.xy
+    x = [Decimal(val) / tree.scale_factor for val in x_scaled]
+    y = [Decimal(val) / tree.scale_factor for val in y_scaled]
+
+    if ax is None:
+        ax = plt.gca()
+    ax.plot(x, y, color=color, zorder=+0, alpha=alpha)
+    ax.fill(x, y, color=color, zorder=-1, alpha=0.5 * alpha)
+
+
+def plot_trees(params: tuple, color=None, ax=None, alpha=1.0):
+    n = params[0].shape[0]
+    for i in range(n):
+        pos = params[0][i]
+        ang = params[1][i]
+        plot_tree((pos, ang), color=f"C{i}" if color is None else color, ax=ax, alpha=alpha)
+
+
 def plot_solution(
         solution: Solution | SolutionEval,
         show_text=False,
@@ -81,15 +110,15 @@ def plot_solution(
         show_grid=False,
         show_center_circle=False,
         grid_mask=None,
+        ax=None,
 ):
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
     import numpy as np
 
-    pos, ang = solution.params
-
     aux_data = solution.aux_data
     grid = aux_data.get("grid") if aux_data is not None else None
+    pos, ang = solution.params
 
     min_x = None
     max_x = None
@@ -120,8 +149,10 @@ def plot_solution(
                 )
         mask_coords = [center + (i - n_half) * size for i in range(n_cells + 1)]
 
-    if mask_coords is not None and mask_values is not None:
+    if ax is None:
         ax = plt.gca()
+
+    if mask_coords is not None and mask_values is not None:
         ax.pcolormesh(
             mask_coords,
             mask_coords,
@@ -134,13 +165,11 @@ def plot_solution(
 
     if show_grid:
         if mask_coords is not None:
-            ax = plt.gca()
             for coord in mask_coords:
                 ax.axhline(coord, color="lightgrey", linewidth=0.5, zorder=-1)
                 ax.axvline(coord, color="lightgrey", linewidth=0.5, zorder=-1)
 
     if show_center_circle:
-        ax = plt.gca()
         centers = tree_.get_tree_centers(solution.params)
         radius = float(tree_.THR) / 2.0
         for i, center in enumerate(centers):
@@ -179,10 +208,16 @@ def plot_solution(
         x_mean = float(np.mean(x))
         y_mean = float(np.mean(y))
 
-        plt.plot(x, y, color=f"C{i}")
-        plt.fill(x, y, color=f"C{i}", alpha=0.5)
+        ax.plot(x, y, color=f"C{i}")
+        ax.fill(x, y, color=f"C{i}", alpha=0.5)
         if show_text:
-            plt.text(x_mean, y_mean, "%.3d" % i, color='k', bbox=dict(boxstyle=f"round,pad={0.1}", fc="lightgrey"))
+            ax.text(
+                x_mean,
+                y_mean,
+                "%.3d" % i,
+                color="k",
+                bbox=dict(boxstyle="round,pad=0.1", fc="lightgrey"),
+            )
         x_min_i = float(min(x))
         x_max_i = float(max(x))
         y_min_i = float(min(y))
@@ -193,7 +228,7 @@ def plot_solution(
         max_y = y_max_i if max_y is None else max(max_y, y_max_i)
 
     if title is not None:
-        plt.title(title)
+        ax.set_title(title)
     if min_x is None and mask_coords is not None:
         min_x = min(mask_coords)
         max_x = max(mask_coords)
@@ -201,7 +236,7 @@ def plot_solution(
         max_y = max(mask_coords)
     if min_x is not None and min_y is not None:
         max_abs = max(abs(min_x), abs(max_x), abs(min_y), abs(max_y))
-        ax = plt.gca()
         ax.set_xlim(-max_abs, max_abs)
         ax.set_ylim(-max_abs, max_abs)
-    plt.gca().set_aspect('equal')
+    ax.set_aspect("equal")
+    return ax

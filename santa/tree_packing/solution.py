@@ -56,5 +56,16 @@ class TreePackingSolution(Solution):
         return tree.params_to_trees(self.params)
 
     @property
+    def tree_normals(self):
+        normals = tree.TREE_NORMALS
+        fn = tree._rotate_point
+        fn = jax.vmap(fn, (0, None))
+        fn = jax.vmap(fn, (0, None))
+        fn = jax.vmap(fn, (None, 0))
+        print(normals.shape, self.params[1].shape)
+        rotated_normals = fn(normals, self.params[1])
+        return rotated_normals
+
+    @property
     def centers(self):
         return tree.get_tree_centers(self.params)

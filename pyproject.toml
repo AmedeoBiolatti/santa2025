@@ -5,6 +5,7 @@ description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
     "flax>=0.12.2",
+    "iprogress>=0.4",
     "ipykernel>=7.1.0",
     "jax[cuda]>=0.8.2",
     "matplotlib>=3.10.8",
