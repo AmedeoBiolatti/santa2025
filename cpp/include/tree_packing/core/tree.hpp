@@ -62,6 +62,22 @@ constexpr float THR2 = THR * THR;
     return fig;
 }
 
+// Compute AABB for a figure
+[[nodiscard]] inline AABB compute_aabb(const Figure& fig) {
+    AABB aabb;
+    aabb.expand(fig);
+    return aabb;
+}
+
+// Compute max abs coordinate from an AABB
+[[nodiscard]] inline float compute_aabb_max_abs(const AABB& aabb) {
+    float max_abs = std::abs(aabb.min.x);
+    max_abs = std::max(max_abs, std::abs(aabb.min.y));
+    max_abs = std::max(max_abs, std::abs(aabb.max.x));
+    max_abs = std::max(max_abs, std::abs(aabb.max.y));
+    return max_abs;
+}
+
 // Get tree center from params (using small-radius proxy)
 [[nodiscard]] inline Vec2 get_tree_center(const TreeParams& params) {
     float c = std::cos(params.angle);

@@ -1,12 +1,53 @@
 #include "tree_packing/constraints/intersection.hpp"
 #include "tree_packing/geometry/sat.hpp"
 #include "tree_packing/core/tree.hpp"
+#include <algorithm>
 
 #ifdef ENABLE_OPENMP
 #include <omp.h>
 #endif
 
 namespace tree_packing {
+namespace {
+struct IntersectionScratch {
+    std::vector<Index> candidates;
+    std::vector<int> seen;
+    std::vector<char> is_modified;
+};
+
+IntersectionScratch& scratch() {
+    static thread_local IntersectionScratch s;
+    return s;
+}
+
+SolutionEval::IntersectionList& ensure_unique_row(
+    SolutionEval::IntersectionMap& map,
+    size_t idx
+) {
+    auto& row_ptr = map[idx];
+    if (!row_ptr) {
+        row_ptr = std::make_shared<SolutionEval::IntersectionList>();
+    } else if (!row_ptr.unique()) {
+        row_ptr = std::make_shared<SolutionEval::IntersectionList>(*row_ptr);
+    }
+    return *row_ptr;
+}
+
+bool erase_pair(std::vector<std::pair<Index, float>>& list, int key, float& score_out) {
+    Index target = static_cast<Index>(key);
+    for (size_t i = 0; i < list.size(); ++i) {
+        if (list[i].first == target) {
+            score_out = list[i].second;
+            if (i + 1 != list.size()) {
+                list[i] = list.back();
+            }
+            list.pop_back();
+            return true;
+        }
+    }
+    return false;
+}
+}  // namespace
 
 float IntersectionConstraint::compute_pair_score(
     const Figure& f0,
@@ -28,37 +69,55 @@ float IntersectionConstraint::compute_pair_score(
 
 float IntersectionConstraint::eval(
     const Solution& solution,
-    std::vector<std::unordered_map<int, float>>& map
+    SolutionEval::IntersectionMap& map
 ) const {
     const auto& figures = solution.figures();
     const auto& centers = solution.centers();
     const auto& grid = solution.grid();
     size_t n = figures.size();
 
-    map.clear();
     map.resize(n);
     int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * grid.capacity();
     for (auto& row : map) {
-        row.reserve(reserve_size);
+        if (!row) {
+            row = std::make_shared<SolutionEval::IntersectionList>();
+        } else {
+            row->clear();
+        }
+        row->reserve(reserve_size);
     }
 
     float total_violation = 0.0f;
 
-    std::vector<int> candidates;
+    auto& work = scratch();
+    auto& candidates = work.candidates;
+    auto& seen = work.seen;
     candidates.reserve(static_cast<size_t>(reserve_size));
+    if (seen.size() != n) {
+        seen.assign(n, -1);
+    } else {
+        std::fill(seen.begin(), seen.end(), -1);
+    }
+    int stamp = 0;
 
     for (size_t i = 0; i < n; ++i) {
         if (!solution.is_valid(i)) continue;
 
         grid.get_candidates(static_cast<int>(i), candidates);
-        for (int c : candidates) {
-            if (c < 0 || static_cast<size_t>(c) <= i) continue;
-            if (!solution.is_valid(static_cast<size_t>(c))) continue;
+        ++stamp;
+        int i_idx = static_cast<int>(i);
+        for (Index c : candidates) {
+            if (c < 0) continue;
+            int c_idx = static_cast<int>(c);
+            if (static_cast<size_t>(c_idx) <= i) continue;
+            if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
+            if (seen[c_idx] == stamp) continue;
+            seen[c_idx] = stamp;
 
-            float score = compute_pair_score(figures[i], figures[c], centers[i], centers[c]);
+            float score = compute_pair_score(figures[i], figures[c_idx], centers[i], centers[c_idx]);
             if (score <= 0.0f) continue;
-            map[i][c] = score;
-            map[c][static_cast<int>(i)] = score;
+            map[i]->emplace_back(static_cast<Index>(c_idx), score);
+            map[c_idx]->emplace_back(static_cast<Index>(i_idx), score);
             total_violation += 2.0f * score;  // Count both directions
         }
     }
@@ -68,8 +127,7 @@ float IntersectionConstraint::eval(
 
 float IntersectionConstraint::eval_update(
     const Solution& solution,
-    const Solution& prev_solution,
-    std::vector<std::unordered_map<int, float>>& map,
+    SolutionEval::IntersectionMap& map,
     const std::vector<int>& modified_indices,
     float prev_total
 ) const {
@@ -80,7 +138,13 @@ float IntersectionConstraint::eval_update(
 
     float total = prev_total;
     int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * new_grid.capacity();
-    std::vector<char> is_modified(n, 0);
+    auto& work = scratch();
+    auto& is_modified = work.is_modified;
+    if (is_modified.size() != n) {
+        is_modified.assign(n, 0);
+    } else {
+        std::fill(is_modified.begin(), is_modified.end(), 0);
+    }
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
         is_modified[static_cast<size_t>(idx)] = 1;
@@ -90,35 +154,49 @@ float IntersectionConstraint::eval_update(
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
 
-        auto& row = map[static_cast<size_t>(idx)];
+        auto& row = ensure_unique_row(map, static_cast<size_t>(idx));
         for (const auto& [c, score] : row) {
             total -= 2.0f * score;
-            map[static_cast<size_t>(c)].erase(idx);
+            float removed = 0.0f;
+            auto& neighbor = ensure_unique_row(map, static_cast<size_t>(c));
+            erase_pair(neighbor, idx, removed);
         }
         row.clear();
         row.reserve(reserve_size);
     }
 
     // Compute new values for modified indices using new grid
-    std::vector<int> candidates;
+    auto& candidates = work.candidates;
+    auto& seen = work.seen;
     candidates.reserve(static_cast<size_t>(reserve_size));
+    if (seen.size() != n) {
+        seen.assign(n, -1);
+    } else {
+        std::fill(seen.begin(), seen.end(), -1);
+    }
+    int stamp = 0;
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
         if (!solution.is_valid(static_cast<size_t>(idx))) continue;
 
         new_grid.get_candidates(idx, candidates);
-        for (int c : candidates) {
-            if (c < 0 || c == idx) continue;
-            if (!solution.is_valid(static_cast<size_t>(c))) continue;
-            if (is_modified[static_cast<size_t>(c)] && c < idx) continue;
+        ++stamp;
+        for (Index c : candidates) {
+            if (c < 0) continue;
+            int c_idx = static_cast<int>(c);
+            if (c_idx == idx) continue;
+            if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
+            if (is_modified[static_cast<size_t>(c_idx)] && c_idx < idx) continue;
+            if (seen[c_idx] == stamp) continue;
+            seen[c_idx] = stamp;
 
             float score = compute_pair_score(
-                figures[idx], figures[c],
-                centers[idx], centers[c]
+                figures[idx], figures[c_idx],
+                centers[idx], centers[c_idx]
             );
             if (score <= 0.0f) continue;
-            map[static_cast<size_t>(idx)][c] = score;
-            map[static_cast<size_t>(c)][idx] = score;
+            ensure_unique_row(map, static_cast<size_t>(idx)).emplace_back(static_cast<Index>(c_idx), score);
+            ensure_unique_row(map, static_cast<size_t>(c_idx)).emplace_back(static_cast<Index>(idx), score);
             total += 2.0f * score;
         }
     }

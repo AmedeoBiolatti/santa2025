@@ -29,31 +29,33 @@ public:
         return {};
     }
 
-    // Apply one optimization step
-    // Returns new solution and updated state
-    virtual std::pair<SolutionEval, std::any> apply(
+    // Apply one optimization step in-place
+    virtual void apply(
         const SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng
+        RNG& rng,
+        SolutionEval& out
     ) = 0;
 
     // Clone optimizer (deep copy)
     [[nodiscard]] virtual OptimizerPtr clone() const = 0;
 
     // Full optimization step (apply + update best)
-    std::tuple<SolutionEval, std::any, GlobalState> step(
-        const SolutionEval& solution,
-        std::any& state,
-        GlobalState& global_state
-    );
-
-    // Run multiple steps in sequence
-    std::tuple<SolutionEval, std::any, GlobalState> run(
+    void step(
         const SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        int n
+        SolutionEval& out
+    );
+
+    // Run multiple steps in sequence
+    void run(
+        const SolutionEval& solution,
+        std::any& state,
+        GlobalState& global_state,
+        int n,
+        SolutionEval& out
     );
 
 protected:

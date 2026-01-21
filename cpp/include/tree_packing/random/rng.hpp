@@ -54,12 +54,29 @@ public:
         return result;
     }
 
+    // Generate random permutation of [0, n) into existing buffer
+    void permutation(int n, std::vector<int>& out) {
+        out.resize(n);
+        for (int i = 0; i < n; ++i) out[i] = i;
+        for (int i = n - 1; i > 0; --i) {
+            int j = randint(0, i);
+            std::swap(out[i], out[j]);
+        }
+    }
+
     // Choose k random indices from [0, n) without replacement
     [[nodiscard]] std::vector<int> choice(int n, int k) {
         if (k > n) k = n;
         auto perm = permutation(n);
         perm.resize(k);
         return perm;
+    }
+
+    // Choose k random indices from [0, n) without replacement into existing buffer
+    void choice(int n, int k, std::vector<int>& out) {
+        if (k > n) k = n;
+        permutation(n, out);
+        out.resize(k);
     }
 
     // Choose index based on weights (unnormalized probabilities)

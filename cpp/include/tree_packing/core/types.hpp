@@ -9,6 +9,8 @@
 
 namespace tree_packing {
 
+using Index = int16_t;
+
 // Forward declarations
 struct Vec2;
 struct Mat2;

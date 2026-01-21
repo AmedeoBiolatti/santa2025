@@ -2,59 +2,61 @@
 #include "tree_packing/core/tree.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 
 namespace tree_packing {
 
-RandomRecreate::RandomRecreate(int max_recreate, float box_size, float delta)
-    : max_recreate_(max_recreate), box_size_(box_size), delta_(delta)
+RandomRecreate::RandomRecreate(int max_recreate, float box_size, float delta, bool verbose)
+    : max_recreate_(max_recreate)
+    , box_size_(box_size)
+    , delta_(delta)
+    , verbose_(verbose)
 {
     if (max_recreate_ < 1) max_recreate_ = 1;
 }
 
 std::any RandomRecreate::init_state(const SolutionEval& solution) {
-    return RandomRecreateState{0};
+    RandomRecreateState state;
+    state.iteration = 0;
+    return state;
 }
 
-std::vector<int> RandomRecreate::get_removed_indices(const TreeParamsSoA& params) {
-    std::vector<int> indices;
+void RandomRecreate::get_removed_indices(const TreeParamsSoA& params, std::vector<int>& out) {
+    out.clear();
     for (size_t i = 0; i < params.size(); ++i) {
         if (params.is_nan(i)) {
-            indices.push_back(static_cast<int>(i));
+            out.push_back(static_cast<int>(i));
         }
     }
-    return indices;
 }
 
-std::pair<SolutionEval, std::any> RandomRecreate::apply(
+void RandomRecreate::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
-    const auto& params = solution.solution.params();
-    const auto& figures = solution.solution.figures();
+    if (out.solution.revision() != solution.solution.revision()) {
+        out.solution.copy_from(solution.solution);
+    }
+    const auto& params = out.solution.params();
+    float max_abs = out.solution.max_max_abs();
 
     // Find removed (NaN) indices
-    auto removed = get_removed_indices(params);
+    auto* rec_state = std::any_cast<RandomRecreateState>(&state);
+    if (!rec_state) {
+        state = init_state(solution);
+        rec_state = std::any_cast<RandomRecreateState>(&state);
+    }
+    auto& removed = rec_state->removed;
+    get_removed_indices(params, removed);
 
     if (removed.empty()) {
         // Nothing to recreate
-        auto rec_state = std::any_cast<RandomRecreateState>(state);
-        rec_state.iteration++;
-        return {solution, rec_state};
-    }
-
-    // Compute current bounds from valid trees
-    float max_abs = 0.0f;
-    for (const auto& fig : figures) {
-        if (fig.is_nan()) continue;
-        for (const auto& tri : fig.triangles) {
-            max_abs = std::max({max_abs,
-                std::abs(tri.v0.x), std::abs(tri.v0.y),
-                std::abs(tri.v1.x), std::abs(tri.v1.y),
-                std::abs(tri.v2.x), std::abs(tri.v2.y)});
-        }
+        rec_state->iteration++;
+        return;
     }
 
     // If no valid trees, use default box
@@ -68,33 +70,32 @@ std::pair<SolutionEval, std::any> RandomRecreate::apply(
     // Select indices to recreate (up to max_recreate)
     int n_recreate = std::min(max_recreate_, static_cast<int>(removed.size()));
 
-    // Shuffle removed indices and take first n_recreate
-    std::vector<int> indices(removed.begin(), removed.end());
-    for (int i = static_cast<int>(indices.size()) - 1; i > 0; --i) {
-        int j = rng.randint(0, i);
-        std::swap(indices[i], indices[j]);
-    }
+    // Take first n_recreate removed indices (order doesn't matter)
+    auto& indices = rec_state->indices;
+    indices = removed;
     indices.resize(n_recreate);
 
-    // Create new params with random positions for recreated trees
-    TreeParamsSoA new_params = params;
+    // Create new solution with updated params
     for (int idx : indices) {
-        new_params.x[idx] = rng.uniform(minval, maxval);
-        new_params.y[idx] = rng.uniform(minval, maxval);
-        new_params.angle[idx] = rng.uniform(-PI, PI);
+        TreeParams p{
+            rng.uniform(minval, maxval),
+            rng.uniform(minval, maxval),
+            rng.uniform(-PI, PI)
+        };
+        out.solution.set_params(static_cast<size_t>(idx), p);
     }
 
-    // Create new solution with updated params
-    Solution new_sol = solution.solution.update(new_params, indices);
-
-    // Evaluate the new solution incrementally
-    SolutionEval new_eval = problem_->eval_update(new_sol, solution, indices);
+    // Evaluate the new solution
+    problem_->eval_inplace(out.solution, out);
 
     // Update state
-    auto rec_state = std::any_cast<RandomRecreateState>(state);
-    rec_state.iteration++;
+    rec_state->iteration++;
 
-    return {new_eval, rec_state};
+    if (verbose_) {
+        std::cout << "[RandomRecreate] iter=" << rec_state->iteration
+                  << " removed=" << removed.size()
+                  << " recreated=" << n_recreate << "\n";
+    }
 }
 
 OptimizerPtr RandomRecreate::clone() const {

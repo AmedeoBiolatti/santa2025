@@ -13,6 +13,7 @@ struct ALNSState {
     std::vector<std::any> recreate_states;
     std::vector<float> ruin_weights;
     std::vector<float> recreate_weights;
+    SolutionEval ruined;
 };
 
 // Adaptive Large Neighborhood Search optimizer
@@ -24,18 +25,20 @@ public:
         float reaction_factor = 0.01f,
         float reward_improve = 1.0f,
         float reward_no_improve = 0.0f,
-        float min_weight = 1e-3f
+        float min_weight = 1e-3f,
+        bool verbose = false
     );
 
     void set_problem(Problem* problem) override;
 
     std::any init_state(const SolutionEval& solution) override;
 
-    std::pair<SolutionEval, std::any> apply(
+    void apply(
         const SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng
+        RNG& rng,
+        SolutionEval& out
     ) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
@@ -48,6 +51,7 @@ private:
     float reward_improve_;
     float reward_no_improve_;
     float min_weight_;
+    bool verbose_;
 
     // Select operator index based on weights
     int select_index(const std::vector<float>& weights, RNG& rng);

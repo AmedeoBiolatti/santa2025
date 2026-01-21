@@ -64,6 +64,21 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("set_nan", &tree_packing::TreeParamsSoA::set_nan)
         .def("is_nan", &tree_packing::TreeParamsSoA::is_nan)
         .def("count_nan", &tree_packing::TreeParamsSoA::count_nan)
+        .def("to_numpy", [](const tree_packing::TreeParamsSoA& self) {
+            py::ssize_t n = static_cast<py::ssize_t>(self.size());
+            std::vector<py::ssize_t> shape = {n, 2};
+            std::vector<py::ssize_t> strides = {
+                static_cast<py::ssize_t>(2 * sizeof(float)),
+                static_cast<py::ssize_t>(sizeof(float))
+            };
+            py::array_t<float> pos(shape, strides);
+            auto buf = pos.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                buf(i, 0) = self.x[static_cast<size_t>(i)];
+                buf(i, 1) = self.y[static_cast<size_t>(i)];
+            }
+            return py::make_tuple(pos, make_array_view(self.angle, py::cast(&self)));
+        })
         .def_property("x",
             [](const tree_packing::TreeParamsSoA& self) {
                 return make_array_view(self.x, py::cast(&self));
@@ -118,6 +133,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def_readwrite("objective", &tree_packing::SolutionEval::objective)
         .def_readwrite("intersection_violation", &tree_packing::SolutionEval::intersection_violation)
         .def_readwrite("bounds_violation", &tree_packing::SolutionEval::bounds_violation)
+        .def("copy_from", &tree_packing::SolutionEval::copy_from)
         .def("total_violation", &tree_packing::SolutionEval::total_violation)
         .def("n_missing", &tree_packing::SolutionEval::n_missing)
         .def("reg", &tree_packing::SolutionEval::reg);
@@ -159,8 +175,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("uniform", py::overload_cast<>(&tree_packing::RNG::uniform))
         .def("uniform", py::overload_cast<float, float>(&tree_packing::RNG::uniform))
         .def("randint", &tree_packing::RNG::randint)
-        .def("permutation", &tree_packing::RNG::permutation)
-        .def("choice", &tree_packing::RNG::choice)
+        .def("permutation", py::overload_cast<int>(&tree_packing::RNG::permutation))
+        .def("choice", py::overload_cast<int, int>(&tree_packing::RNG::choice))
         .def("split", &tree_packing::RNG::split);
 
     py::class_<OptimizerState>(m, "OptimizerState")
@@ -179,8 +195,9 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             tree_packing::RNG& rng
         ) {
-            auto [new_solution, new_state] = self.apply(solution, state.value, global_state, rng);
-            return py::make_tuple(new_solution, OptimizerState{new_state});
+            tree_packing::SolutionEval out;
+            self.apply(solution, state.value, global_state, rng, out);
+            return py::make_tuple(out, OptimizerState{state.value});
         })
         .def("step", [](
             tree_packing::Optimizer& self,
@@ -188,10 +205,9 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             OptimizerState& state,
             tree_packing::GlobalState& global_state
         ) {
-            auto [new_solution, new_state, new_global_state] = self.step(
-                solution, state.value, global_state
-            );
-            return py::make_tuple(new_solution, OptimizerState{new_state}, new_global_state);
+            tree_packing::SolutionEval out;
+            self.step(solution, state.value, global_state, out);
+            return py::make_tuple(out, OptimizerState{state.value}, global_state);
         })
         .def("run", [](
             tree_packing::Optimizer& self,
@@ -200,33 +216,68 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             int n
         ) {
-            auto [new_solution, new_state, new_global_state] = self.run(
-                solution, state.value, global_state, n
-            );
-            return py::make_tuple(new_solution, OptimizerState{new_state}, new_global_state);
+            tree_packing::SolutionEval out;
+            self.run(solution, state.value, global_state, n, out);
+            return py::make_tuple(out, OptimizerState{state.value}, global_state);
+        })
+        .def("apply_inplace", [](
+            tree_packing::Optimizer& self,
+            tree_packing::SolutionEval& solution,
+            OptimizerState& state,
+            tree_packing::GlobalState& global_state,
+            tree_packing::RNG& rng
+        ) {
+            tree_packing::SolutionEval out;
+            self.apply(solution, state.value, global_state, rng, out);
+            solution.copy_from(out);
+        })
+        .def("step_inplace", [](
+            tree_packing::Optimizer& self,
+            tree_packing::SolutionEval& solution,
+            OptimizerState& state,
+            tree_packing::GlobalState& global_state
+        ) {
+            tree_packing::SolutionEval out;
+            self.step(solution, state.value, global_state, out);
+            solution.copy_from(out);
+        })
+        .def("run_inplace", [](
+            tree_packing::Optimizer& self,
+            tree_packing::SolutionEval& solution,
+            OptimizerState& state,
+            tree_packing::GlobalState& global_state,
+            int n
+        ) {
+            tree_packing::SolutionEval out;
+            self.run(solution, state.value, global_state, n, out);
+            solution.copy_from(out);
         });
 
     // RandomRuin
     py::class_<tree_packing::RandomRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::RandomRuin>>(m, "RandomRuin")
-        .def(py::init<int>(), py::arg("n_remove") = 1);
+        .def(py::init<int, bool>(), py::arg("n_remove") = 1, py::arg("verbose") = false);
 
     // SpatialRuin
     py::class_<tree_packing::SpatialRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::SpatialRuin>>(m, "SpatialRuin")
-        .def(py::init<int>(), py::arg("n_remove") = 1);
+        .def(py::init<int, bool>(), py::arg("n_remove") = 1, py::arg("verbose") = false);
 
     // RandomRecreate
     py::class_<tree_packing::RandomRecreate, tree_packing::Optimizer, std::shared_ptr<tree_packing::RandomRecreate>>(m, "RandomRecreate")
-        .def(py::init<int, float, float>(),
-            py::arg("max_recreate") = 1, py::arg("box_size") = 5.0f, py::arg("delta") = 0.35f);
+        .def(py::init<int, float, float, bool>(),
+            py::arg("max_recreate") = 1,
+            py::arg("box_size") = 5.0f,
+            py::arg("delta") = 0.35f,
+            py::arg("verbose") = false);
 
     // NoiseOptimizer
     py::class_<tree_packing::NoiseOptimizer, tree_packing::Optimizer, std::shared_ptr<tree_packing::NoiseOptimizer>>(m, "NoiseOptimizer")
-        .def(py::init<float>(), py::arg("noise_level") = 0.01f);
+        .def(py::init<float, bool>(), py::arg("noise_level") = 0.01f, py::arg("verbose") = false);
 
     // Chain
     py::class_<tree_packing::Chain, tree_packing::Optimizer, std::shared_ptr<tree_packing::Chain>>(m, "Chain")
         .def(py::init([](
-            std::vector<std::shared_ptr<tree_packing::Optimizer>> optimizers
+            std::vector<std::shared_ptr<tree_packing::Optimizer>> optimizers,
+            bool verbose
         ) {
             std::vector<tree_packing::OptimizerPtr> optimizer_ptrs;
             optimizer_ptrs.reserve(optimizers.size());
@@ -234,9 +285,10 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
                 optimizer_ptrs.push_back(clone_optimizer(op));
             }
 
-            return std::make_shared<tree_packing::Chain>(std::move(optimizer_ptrs));
+            return std::make_shared<tree_packing::Chain>(std::move(optimizer_ptrs), verbose);
         }),
-            py::arg("optimizers"));
+            py::arg("optimizers"),
+            py::arg("verbose") = false);
 
     // ALNS
     py::class_<tree_packing::ALNS, tree_packing::Optimizer, std::shared_ptr<tree_packing::ALNS>>(m, "ALNS")
@@ -246,7 +298,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             float reaction_factor,
             float reward_improve,
             float reward_no_improve,
-            float min_weight
+            float min_weight,
+            bool verbose
         ) {
             std::vector<tree_packing::OptimizerPtr> ruin_ptrs;
             std::vector<tree_packing::OptimizerPtr> recreate_ptrs;
@@ -266,7 +319,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
                 reaction_factor,
                 reward_improve,
                 reward_no_improve,
-                min_weight
+                min_weight,
+                verbose
             );
         }),
             py::arg("ruin_operators"),
@@ -274,7 +328,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             py::arg("reaction_factor") = 0.01f,
             py::arg("reward_improve") = 1.0f,
             py::arg("reward_no_improve") = 0.0f,
-            py::arg("min_weight") = 1e-3f);
+            py::arg("min_weight") = 1e-3f,
+            py::arg("verbose") = false);
 
     // CoolingSchedule enum
     py::enum_<tree_packing::CoolingSchedule>(m, "CoolingSchedule")
@@ -358,9 +413,9 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         // Run optimization
         for (int i = 0; i < num_iterations; ++i) {
             tree_packing::RNG rng(global_state.split_rng());
-            auto [new_solution, new_state] = sa.apply(solution_eval, state, global_state, rng);
-            solution_eval = new_solution;
-            state = new_state;
+            tree_packing::SolutionEval new_solution;
+            sa.apply(solution_eval, state, global_state, rng, new_solution);
+            solution_eval.copy_from(new_solution);
 
             global_state.maybe_update_best(problem, solution_eval);
             global_state.next();

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <utility>
 
 namespace tree_packing {
 
@@ -59,62 +60,62 @@ float SimulatedAnnealing::compute_temperature(int iteration) const {
     return std::max(temp, min_temp_);
 }
 
-std::pair<SolutionEval, std::any> SimulatedAnnealing::apply(
+void SimulatedAnnealing::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
-    auto sa_state = std::any_cast<SAState>(state);
+    auto* sa_state = std::any_cast<SAState>(&state);
+    if (!sa_state) {
+        state = init_state(solution);
+        sa_state = std::any_cast<SAState>(&state);
+    }
 
     // Handle reheating with patience
     if (patience_ > 0) {
         if (global_state.iters_since_improvement() > static_cast<uint64_t>(patience_)) {
             // Reset temperature
-            sa_state.iteration = 0;
-            sa_state.counter = 0;
+            sa_state->iteration = 0;
+            sa_state->counter = 0;
         }
     }
 
     // Apply inner optimizer
     RNG inner_rng = rng.split();
-    auto [candidate_solution, new_inner_state] = inner_optimizer_->apply(
-        solution, sa_state.inner_state, global_state, inner_rng
+    inner_optimizer_->apply(
+        solution, sa_state->inner_state, global_state, inner_rng, out
     );
 
     // Compute acceptance probability
     float current_score = problem_->score(solution, global_state);
-    float candidate_score = problem_->score(candidate_solution, global_state);
+    float candidate_score = problem_->score(out, global_state);
     float delta = candidate_score - current_score;
 
-    float temperature = compute_temperature(sa_state.iteration);
+    float temperature = compute_temperature(sa_state->iteration);
     float accept_prob = std::min(std::exp(-delta / temperature), 1.0f);
     bool accept = rng.uniform() < accept_prob;
 
-    SolutionEval result;
-    // Always update inner state (ALNS weights should update regardless of acceptance)
-    sa_state.inner_state = new_inner_state;
-
     if (accept) {
-        result = candidate_solution;
-        sa_state.n_accepted++;
+        sa_state->n_accepted++;
     } else {
-        result = solution;
-        sa_state.n_rejected++;
+        out = solution;
+        sa_state->n_rejected++;
     }
 
     // Update state
-    sa_state.iteration++;
-    sa_state.counter++;
-    sa_state.temperature = temperature;
+    sa_state->iteration++;
+    sa_state->counter++;
+    sa_state->temperature = temperature;
 
     if (verbose_) {
-        int total = sa_state.n_accepted + sa_state.n_rejected;
-        float rate = (total > 0) ? static_cast<float>(sa_state.n_accepted) / total : 0.0f;
-        std::cout << "SA: temp=" << temperature << " acc-rate=" << rate << "\n";
+        int total = sa_state->n_accepted + sa_state->n_rejected;
+        float rate = (total > 0) ? static_cast<float>(sa_state->n_accepted) / total : 0.0f;
+        std::cout << "[SimulatedAnnealing] temp=" << temperature << " acc-rate=" << rate;
+        std::cout << " | score: " << current_score << "->" << candidate_score << " prob=" << accept_prob;
+        std::cout << (accept ? "👍" : "👎") << "\n";
     }
-
-    return {result, sa_state};
 }
 
 OptimizerPtr SimulatedAnnealing::clone() const {

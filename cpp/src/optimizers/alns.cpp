@@ -1,6 +1,8 @@
 #include "tree_packing/optimizers/alns.hpp"
-#include <numeric>
 #include <algorithm>
+#include <iostream>
+#include <numeric>
+#include <utility>
 
 namespace tree_packing {
 
@@ -10,7 +12,8 @@ ALNS::ALNS(
     float reaction_factor,
     float reward_improve,
     float reward_no_improve,
-    float min_weight
+    float min_weight,
+    bool verbose
 )
     : ruin_operators_(std::move(ruin_operators))
     , recreate_operators_(std::move(recreate_operators))
@@ -18,6 +21,7 @@ ALNS::ALNS(
     , reward_improve_(reward_improve)
     , reward_no_improve_(reward_no_improve)
     , min_weight_(min_weight)
+    , verbose_(verbose)
 {}
 
 void ALNS::set_problem(Problem* problem) {
@@ -66,48 +70,60 @@ void ALNS::update_weights(std::vector<float>& weights, int index, float reward) 
     }
 }
 
-std::pair<SolutionEval, std::any> ALNS::apply(
+void ALNS::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
-    auto alns_state = std::any_cast<ALNSState>(state);
+    auto* alns_state = std::any_cast<ALNSState>(&state);
+    if (!alns_state) {
+        state = init_state(solution);
+        alns_state = std::any_cast<ALNSState>(&state);
+    }
 
     // Select ruin operator
-    int ruin_idx = select_index(alns_state.ruin_weights, rng);
+    int ruin_idx = select_index(alns_state->ruin_weights, rng);
     RNG ruin_rng = rng.split();
 
     // Apply ruin
-    auto [ruined_solution, new_ruin_state] = ruin_operators_[ruin_idx]->apply(
-        solution, alns_state.ruin_states[ruin_idx], global_state, ruin_rng
+    ruin_operators_[ruin_idx]->apply(
+        solution, alns_state->ruin_states[ruin_idx], global_state, ruin_rng, alns_state->ruined
     );
-    alns_state.ruin_states[ruin_idx] = new_ruin_state;
 
     // Select recreate operator
-    int recreate_idx = select_index(alns_state.recreate_weights, rng);
+    int recreate_idx = select_index(alns_state->recreate_weights, rng);
     RNG recreate_rng = rng.split();
 
-    // Apply recreate
-    auto [recreated_solution, new_recreate_state] = recreate_operators_[recreate_idx]->apply(
-        ruined_solution, alns_state.recreate_states[recreate_idx], global_state, recreate_rng
+    // Apply recreate into output buffer
+    recreate_operators_[recreate_idx]->apply(
+        alns_state->ruined, alns_state->recreate_states[recreate_idx], global_state, recreate_rng,
+        out
     );
-    alns_state.recreate_states[recreate_idx] = new_recreate_state;
 
     // Evaluate both solutions to compare
     float current_score = problem_->score(solution, global_state);
-    float new_score = problem_->score(recreated_solution, global_state);
+    float new_score = problem_->score(out, global_state);
 
     // Compute reward
     float reward = (new_score < current_score) ? reward_improve_ : reward_no_improve_;
 
     // Update weights
-    update_weights(alns_state.ruin_weights, ruin_idx, reward);
-    update_weights(alns_state.recreate_weights, recreate_idx, reward);
+    update_weights(alns_state->ruin_weights, ruin_idx, reward);
+    update_weights(alns_state->recreate_weights, recreate_idx, reward);
 
-    alns_state.iteration++;
+    alns_state->iteration++;
 
-    return {recreated_solution, alns_state};
+    if (verbose_) {
+        std::cout << "[ALNS] iter=" << alns_state->iteration
+                  << " ruin=" << ruin_idx
+                  << " recreate=" << recreate_idx
+                  << " score: " << current_score << "->" << new_score
+                  << " reward=" << reward << "\n";
+    }
+
+    // Result already in out
 }
 
 OptimizerPtr ALNS::clone() const {
@@ -130,7 +146,8 @@ OptimizerPtr ALNS::clone() const {
         reaction_factor_,
         reward_improve_,
         reward_no_improve_,
-        min_weight_
+        min_weight_,
+        verbose_
     );
 }
 

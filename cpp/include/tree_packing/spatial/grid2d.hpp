@@ -30,16 +30,16 @@ public:
 
     // Get candidate indices near item k (from its cell's neighborhood)
     // Returns indices, with -1 for empty slots
-    std::vector<int> get_candidates(int k) const;
-    void get_candidates(int k, std::vector<int>& out) const;
+    std::vector<Index> get_candidates(int k) const;
+    void get_candidates(int k, std::vector<Index>& out) const;
 
     // Get candidate indices near a position
-    std::vector<int> get_candidates_by_pos(const Vec2& pos) const;
-    void get_candidates_by_pos(const Vec2& pos, std::vector<int>& out) const;
+    std::vector<Index> get_candidates_by_pos(const Vec2& pos) const;
+    void get_candidates_by_pos(const Vec2& pos, std::vector<Index>& out) const;
 
     // Get candidate indices near a cell
-    std::vector<int> get_candidates_by_cell(int i, int j) const;
-    void get_candidates_by_cell(int i, int j, std::vector<int>& out) const;
+    std::vector<Index> get_candidates_by_cell(int i, int j) const;
+    void get_candidates_by_cell(int i, int j, std::vector<Index>& out) const;
 
     // Compute cell indices for a position
     std::pair<int, int> compute_ij(const Vec2& pos) const;

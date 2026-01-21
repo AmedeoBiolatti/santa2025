@@ -20,11 +20,29 @@ public:
     // Evaluate a solution (compute objective and all constraints)
     [[nodiscard]] SolutionEval eval(const Solution& solution) const;
 
+    // Evaluate in-place (reuse buffers in eval)
+    void eval_inplace(const Solution& solution, SolutionEval& eval) const;
+
     // Incremental evaluation (only recompute for modified indices)
     [[nodiscard]] SolutionEval eval_update(
         const Solution& solution,
         const SolutionEval& prev_eval,
         const std::vector<int>& modified_indices
+    ) const;
+
+    // Incremental evaluation in-place (reuse buffers in eval)
+    void eval_update_inplace(
+        const Solution& solution,
+        const SolutionEval& prev_eval,
+        const std::vector<int>& modified_indices,
+        SolutionEval& eval
+    ) const;
+
+    // Update solution params in-place and evaluate full objective/constraints.
+    void update_and_eval(
+        SolutionEval& eval,
+        const std::vector<int>& indices,
+        const TreeParamsSoA& new_params
     ) const;
 
     // Compute score (objective + penalty * violations + missing penalty)

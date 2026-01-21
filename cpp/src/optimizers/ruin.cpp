@@ -1,40 +1,56 @@
 #include "tree_packing/optimizers/ruin.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 
 namespace tree_packing {
 
 // RandomRuin implementation
-RandomRuin::RandomRuin(int n_remove) : n_remove_(n_remove) {
+RandomRuin::RandomRuin(int n_remove, bool verbose)
+    : n_remove_(n_remove), verbose_(verbose) {
     if (n_remove_ < 1) n_remove_ = 1;
 }
 
-std::pair<SolutionEval, std::any> RandomRuin::apply(
+std::any RandomRuin::init_state(const SolutionEval& solution) {
+    RuinState state;
+    state.indices.reserve(static_cast<size_t>(n_remove_));
+    return state;
+}
+
+void RandomRuin::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
-    const auto& params = solution.solution.params();
+    if (out.solution.revision() != solution.solution.revision()) {
+        out.solution.copy_from(solution.solution);
+    }
+    const auto& params = out.solution.params();
     size_t n = params.size();
 
     // Select random indices to remove
-    auto indices = rng.choice(static_cast<int>(n), n_remove_);
-
-    // Create new params with NaN for removed trees
-    TreeParamsSoA new_params = params;
-    for (int idx : indices) {
-        new_params.set_nan(idx);
+    auto* ruin_state = std::any_cast<RuinState>(&state);
+    if (!ruin_state) {
+        state = init_state(solution);
+        ruin_state = std::any_cast<RuinState>(&state);
     }
+    auto& indices = ruin_state->indices;
+    rng.choice(static_cast<int>(n), n_remove_, indices);
 
     // Create new solution with updated params
-    Solution new_sol = solution.solution.update(new_params, indices);
+    for (int idx : indices) {
+        out.solution.set_nan(static_cast<size_t>(idx));
+    }
 
-    // Evaluate the new solution incrementally
-    SolutionEval new_eval = problem_->eval_update(new_sol, solution, indices);
+    // Evaluate the new solution
+    problem_->eval_inplace(out.solution, out);
 
-    return {new_eval, state};
+    if (verbose_) {
+        std::cout << "[RandomRuin] removed=" << indices.size() << "\n";
+    }
 }
 
 OptimizerPtr RandomRuin::clone() const {
@@ -42,7 +58,8 @@ OptimizerPtr RandomRuin::clone() const {
 }
 
 // SpatialRuin implementation
-SpatialRuin::SpatialRuin(int n_remove) : n_remove_(n_remove) {
+SpatialRuin::SpatialRuin(int n_remove, bool verbose)
+    : n_remove_(n_remove), verbose_(verbose) {
     if (n_remove_ < 1) n_remove_ = 1;
 }
 
@@ -70,10 +87,14 @@ Vec2 SpatialRuin::random_point(const TreeParamsSoA& params, RNG& rng) {
     return Vec2{rng.uniform(min_x, max_x), rng.uniform(min_y, max_y)};
 }
 
-std::vector<int> SpatialRuin::select_closest(const TreeParamsSoA& params, const Vec2& point) {
-    std::vector<std::pair<float, int>> distances;
+void SpatialRuin::select_closest(
+    const TreeParamsSoA& params,
+    const Vec2& point,
+    std::vector<int>& out,
+    std::vector<std::pair<float, int>>& distances
+) {
+    distances.clear();
     distances.reserve(params.size());
-
     for (size_t i = 0; i < params.size(); ++i) {
         if (!params.is_nan(i)) {
             float dx = params.x[i] - point.x;
@@ -87,40 +108,54 @@ std::vector<int> SpatialRuin::select_closest(const TreeParamsSoA& params, const 
     std::sort(distances.begin(), distances.end());
 
     // Select closest n_remove
-    std::vector<int> result;
+    out.clear();
     int count = std::min(n_remove_, static_cast<int>(distances.size()));
     for (int i = 0; i < count; ++i) {
-        result.push_back(distances[i].second);
+        out.push_back(distances[i].second);
     }
-
-    return result;
 }
 
-std::pair<SolutionEval, std::any> SpatialRuin::apply(
+std::any SpatialRuin::init_state(const SolutionEval& solution) {
+    RuinState state;
+    state.indices.reserve(static_cast<size_t>(n_remove_));
+    state.distances.reserve(solution.solution.size());
+    return state;
+}
+
+void SpatialRuin::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
-    const auto& params = solution.solution.params();
+    if (out.solution.revision() != solution.solution.revision()) {
+        out.solution.copy_from(solution.solution);
+    }
+    const auto& params = out.solution.params();
 
     // Select random point and find closest trees
     Vec2 point = random_point(params, rng);
-    auto indices = select_closest(params, point);
-
-    // Create new params with NaN for removed trees
-    TreeParamsSoA new_params = params;
-    for (int idx : indices) {
-        new_params.set_nan(idx);
+    auto* ruin_state = std::any_cast<RuinState>(&state);
+    if (!ruin_state) {
+        state = init_state(solution);
+        ruin_state = std::any_cast<RuinState>(&state);
     }
+    auto& indices = ruin_state->indices;
+    select_closest(params, point, indices, ruin_state->distances);
 
     // Create new solution with updated params
-    Solution new_sol = solution.solution.update(new_params, indices);
+    for (int idx : indices) {
+        out.solution.set_nan(static_cast<size_t>(idx));
+    }
 
-    // Evaluate the new solution incrementally
-    SolutionEval new_eval = problem_->eval_update(new_sol, solution, indices);
+    // Evaluate the new solution
+    problem_->eval_inplace(out.solution, out);
 
-    return {new_eval, state};
+    if (verbose_) {
+        std::cout << "[SpatialRuin] removed=" << indices.size()
+                  << " point=(" << point.x << "," << point.y << ")\n";
+    }
 }
 
 OptimizerPtr SpatialRuin::clone() const {

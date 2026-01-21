@@ -96,37 +96,41 @@ void Grid2D::update(int k, const Vec2& new_center) {
     }
 }
 
-std::vector<int> Grid2D::get_candidates(int k) const {
-    std::vector<int> candidates;
+std::vector<Index> Grid2D::get_candidates(int k) const {
+    std::vector<Index> candidates;
     get_candidates(k, candidates);
     return candidates;
 }
 
-void Grid2D::get_candidates(int k, std::vector<int>& out) const {
+void Grid2D::get_candidates(int k, std::vector<Index>& out) const {
     int i = k2ij_[k * 2 + 0];
     int j = k2ij_[k * 2 + 1];
     get_candidates_by_cell(i, j, out);
 }
 
-std::vector<int> Grid2D::get_candidates_by_pos(const Vec2& pos) const {
-    std::vector<int> candidates;
+std::vector<Index> Grid2D::get_candidates_by_pos(const Vec2& pos) const {
+    std::vector<Index> candidates;
     get_candidates_by_pos(pos, candidates);
     return candidates;
 }
 
-void Grid2D::get_candidates_by_pos(const Vec2& pos, std::vector<int>& out) const {
+void Grid2D::get_candidates_by_pos(const Vec2& pos, std::vector<Index>& out) const {
     auto [i, j] = compute_ij(pos);
     get_candidates_by_cell(i, j, out);
 }
 
-std::vector<int> Grid2D::get_candidates_by_cell(int i, int j) const {
-    std::vector<int> candidates;
+std::vector<Index> Grid2D::get_candidates_by_cell(int i, int j) const {
+    std::vector<Index> candidates;
     get_candidates_by_cell(i, j, candidates);
     return candidates;
 }
 
-void Grid2D::get_candidates_by_cell(int i, int j, std::vector<int>& out) const {
-    out.assign(NEIGHBOR_DELTAS.size() * static_cast<size_t>(capacity_), -1);
+void Grid2D::get_candidates_by_cell(int i, int j, std::vector<Index>& out) const {
+    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(capacity_);
+    if (out.size() != needed) {
+        out.resize(needed);
+    }
+    std::fill(out.begin(), out.end(), static_cast<Index>(-1));
     size_t out_idx = 0;
     // Check all 9 neighboring cells
     for (const auto& [di, dj] : NEIGHBOR_DELTAS) {
@@ -139,7 +143,7 @@ void Grid2D::get_candidates_by_cell(int i, int j, std::vector<int>& out) const {
         int base = cell_index(ni, nj);
         for (int s = 0; s < capacity_; ++s) {
             int item = ij2k_[base + s];
-            out[out_idx++] = item;
+            out[out_idx++] = static_cast<Index>(item);
         }
     }
 }

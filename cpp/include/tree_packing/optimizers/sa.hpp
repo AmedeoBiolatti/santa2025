@@ -40,11 +40,12 @@ public:
 
     std::any init_state(const SolutionEval& solution) override;
 
-    std::pair<SolutionEval, std::any> apply(
+    void apply(
         const SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng
+        RNG& rng,
+        SolutionEval& out
     ) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;

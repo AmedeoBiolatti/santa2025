@@ -2,7 +2,6 @@
 
 #include "../core/solution.hpp"
 #include "../spatial/grid2d.hpp"
-#include <unordered_map>
 #include <vector>
 
 namespace tree_packing {
@@ -15,14 +14,13 @@ public:
     // Full evaluation (compute sparse intersection map)
     [[nodiscard]] float eval(
         const Solution& solution,
-        std::vector<std::unordered_map<int, float>>& map
+        SolutionEval::IntersectionMap& map
     ) const;
 
     // Incremental evaluation (update map for modified indices)
     [[nodiscard]] float eval_update(
         const Solution& solution,
-        const Solution& prev_solution,
-        std::vector<std::unordered_map<int, float>>& map,
+        SolutionEval::IntersectionMap& map,
         const std::vector<int>& modified_indices,
         float prev_total
     ) const;

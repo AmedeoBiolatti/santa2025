@@ -1,51 +1,50 @@
 #include "tree_packing/optimizers/optimizer.hpp"
+#include <utility>
 
 namespace tree_packing {
 
-std::tuple<SolutionEval, std::any, GlobalState> Optimizer::step(
+void Optimizer::step(
     const SolutionEval& solution,
     std::any& state,
-    GlobalState& global_state
+    GlobalState& global_state,
+    SolutionEval& out
 ) {
     // Split RNG for this step
     RNG rng(global_state.split_rng());
 
     // Apply optimizer
-    auto [new_solution, new_state] = apply(solution, state, global_state, rng);
+    apply(solution, state, global_state, rng, out);
 
     // Update global state
-    global_state.maybe_update_best(*problem_, new_solution);
+    global_state.maybe_update_best(*problem_, out);
 
     // Increment iteration
     global_state.next();
-
-    return {new_solution, new_state, global_state};
 }
 
-std::tuple<SolutionEval, std::any, GlobalState> Optimizer::run(
+void Optimizer::run(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    int n
+    int n,
+    SolutionEval& out
 ) {
     if (n <= 0) {
-        return {solution, state, global_state};
+        out = solution;
+        return;
     }
 
     SolutionEval current = solution;
-    std::any current_state = state;
+    SolutionEval next;
+    SolutionEval* cur = &current;
+    SolutionEval* nxt = &next;
 
     for (int i = 0; i < n; ++i) {
-        auto [new_solution, new_state, new_global_state] = step(
-            current, current_state, global_state
-        );
-        current = new_solution;
-        current_state = new_state;
-        global_state = new_global_state;
+        step(*cur, state, global_state, *nxt);
+        std::swap(cur, nxt);
     }
 
-    state = current_state;
-    return {current, current_state, global_state};
+    out = std::move(*cur);
 }
 
 }  // namespace tree_packing

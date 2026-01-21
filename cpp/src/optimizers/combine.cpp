@@ -1,11 +1,13 @@
 #include "tree_packing/optimizers/combine.hpp"
+#include <iostream>
 #include <numeric>
 
 namespace tree_packing {
 
 // Chain implementation
-Chain::Chain(std::vector<OptimizerPtr> optimizers)
+Chain::Chain(std::vector<OptimizerPtr> optimizers, bool verbose)
     : optimizers_(std::move(optimizers))
+    , verbose_(verbose)
 {}
 
 void Chain::set_problem(Problem* problem) {
@@ -23,25 +25,31 @@ std::any Chain::init_state(const SolutionEval& solution) {
     return states;
 }
 
-std::pair<SolutionEval, std::any> Chain::apply(
+void Chain::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
-    auto states = std::any_cast<std::vector<std::any>>(state);
+    auto* states = std::any_cast<std::vector<std::any>>(&state);
+    if (!states) {
+        state = init_state(solution);
+        states = std::any_cast<std::vector<std::any>>(&state);
+    }
     SolutionEval current = solution;
+    SolutionEval next;
 
     for (size_t i = 0; i < optimizers_.size(); ++i) {
         RNG step_rng = rng.split();
-        auto [new_sol, new_state] = optimizers_[i]->apply(
-            current, states[i], global_state, step_rng
-        );
-        current = new_sol;
-        states[i] = new_state;
+        optimizers_[i]->apply(current, (*states)[i], global_state, step_rng, next);
+        current = next;
+        if (verbose_) {
+            std::cout << "[Chain] step=" << i << "\n";
+        }
     }
 
-    return {current, states};
+    out = current;
 }
 
 OptimizerPtr Chain::clone() const {
@@ -50,12 +58,14 @@ OptimizerPtr Chain::clone() const {
     for (const auto& opt : optimizers_) {
         clones.push_back(opt->clone());
     }
-    return std::make_unique<Chain>(std::move(clones));
+    return std::make_unique<Chain>(std::move(clones), verbose_);
 }
 
 // Repeat implementation
-Repeat::Repeat(OptimizerPtr optimizer, int n)
-    : optimizer_(std::move(optimizer)), n_(n)
+Repeat::Repeat(OptimizerPtr optimizer, int n, bool verbose)
+    : optimizer_(std::move(optimizer))
+    , n_(n)
+    , verbose_(verbose)
 {
     if (n_ < 0) n_ = 0;
 }
@@ -69,38 +79,42 @@ std::any Repeat::init_state(const SolutionEval& solution) {
     return optimizer_->init_state(solution);
 }
 
-std::pair<SolutionEval, std::any> Repeat::apply(
+void Repeat::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
     if (n_ == 0) {
-        return {solution, state};
+        out = solution;
+        return;
     }
 
     SolutionEval current = solution;
-    std::any current_state = state;
+    SolutionEval next;
 
     for (int i = 0; i < n_; ++i) {
         RNG step_rng = rng.split();
-        auto [new_sol, new_state] = optimizer_->apply(
-            current, current_state, global_state, step_rng
-        );
-        current = new_sol;
-        current_state = new_state;
+        optimizer_->apply(current, state, global_state, step_rng, next);
+        current = next;
+        if (verbose_) {
+            std::cout << "[Repeat] iter=" << i + 1 << "/" << n_ << "\n";
+        }
     }
 
-    return {current, current_state};
+    out = current;
 }
 
 OptimizerPtr Repeat::clone() const {
-    return std::make_unique<Repeat>(optimizer_->clone(), n_);
+    return std::make_unique<Repeat>(optimizer_->clone(), n_, verbose_);
 }
 
 // RestoreBest implementation
-RestoreBest::RestoreBest(OptimizerPtr optimizer, int patience)
-    : optimizer_(std::move(optimizer)), patience_(patience)
+RestoreBest::RestoreBest(OptimizerPtr optimizer, int patience, bool verbose)
+    : optimizer_(std::move(optimizer))
+    , patience_(patience)
+    , verbose_(verbose)
 {
     if (patience_ < 0) patience_ = 0;
 }
@@ -114,11 +128,12 @@ std::any RestoreBest::init_state(const SolutionEval& solution) {
     return optimizer_->init_state(solution);
 }
 
-std::pair<SolutionEval, std::any> RestoreBest::apply(
+void RestoreBest::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
     SolutionEval input = solution;
 
@@ -127,23 +142,30 @@ std::pair<SolutionEval, std::any> RestoreBest::apply(
         const auto* best = global_state.best_solution();
         if (best != nullptr) {
             input = *best;
+            if (verbose_) {
+                std::cout << "[RestoreBest] restored best\n";
+            }
+        } else if (verbose_) {
+            std::cout << "[RestoreBest] no best to restore\n";
         }
     }
 
-    return optimizer_->apply(input, state, global_state, rng);
+    optimizer_->apply(input, state, global_state, rng, out);
 }
 
 OptimizerPtr RestoreBest::clone() const {
-    return std::make_unique<RestoreBest>(optimizer_->clone(), patience_);
+    return std::make_unique<RestoreBest>(optimizer_->clone(), patience_, verbose_);
 }
 
 // RandomChoice implementation
 RandomChoice::RandomChoice(
     std::vector<OptimizerPtr> optimizers,
-    std::vector<float> probabilities
+    std::vector<float> probabilities,
+    bool verbose
 )
     : optimizers_(std::move(optimizers))
     , probabilities_(std::move(probabilities))
+    , verbose_(verbose)
 {
     // If no probabilities given, use uniform
     if (probabilities_.empty()) {
@@ -172,25 +194,31 @@ std::any RandomChoice::init_state(const SolutionEval& solution) {
     return states;
 }
 
-std::pair<SolutionEval, std::any> RandomChoice::apply(
+void RandomChoice::apply(
     const SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng
+    RNG& rng,
+    SolutionEval& out
 ) {
-    auto states = std::any_cast<std::vector<std::any>>(state);
+    auto* states = std::any_cast<std::vector<std::any>>(&state);
+    if (!states) {
+        state = init_state(solution);
+        states = std::any_cast<std::vector<std::any>>(&state);
+    }
 
     // Select optimizer based on probabilities
     int idx = rng.weighted_choice(probabilities_);
 
     // Apply selected optimizer
     RNG step_rng = rng.split();
-    auto [new_sol, new_state] = optimizers_[idx]->apply(
-        solution, states[idx], global_state, step_rng
-    );
-    states[idx] = new_state;
+    optimizers_[idx]->apply(solution, (*states)[idx], global_state, step_rng, out);
 
-    return {new_sol, states};
+    if (verbose_) {
+        std::cout << "[RandomChoice] idx=" << idx << "\n";
+    }
+
+    return;
 }
 
 OptimizerPtr RandomChoice::clone() const {
@@ -199,7 +227,7 @@ OptimizerPtr RandomChoice::clone() const {
     for (const auto& opt : optimizers_) {
         clones.push_back(opt->clone());
     }
-    return std::make_unique<RandomChoice>(std::move(clones), probabilities_);
+    return std::make_unique<RandomChoice>(std::move(clones), probabilities_, verbose_);
 }
 
 }  // namespace tree_packing

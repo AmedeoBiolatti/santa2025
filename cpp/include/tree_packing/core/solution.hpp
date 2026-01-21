@@ -3,8 +3,11 @@
 #include "types.hpp"
 #include "tree.hpp"
 #include "../spatial/grid2d.hpp"
+#include <algorithm>
+#include <atomic>
+#include <limits>
 #include <memory>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace tree_packing {
@@ -39,6 +42,11 @@ public:
     [[nodiscard]] const std::vector<Figure>& figures() const { return figures_; }
     [[nodiscard]] const std::vector<Vec2>& centers() const { return centers_; }
     [[nodiscard]] const std::vector<AABB>& aabbs() const { return aabbs_; }
+    [[nodiscard]] const std::vector<float>& max_abs() const { return max_abs_; }
+    [[nodiscard]] float max_abs(size_t i) const { return max_abs_[i]; }
+    [[nodiscard]] float max_max_abs() const { return max_max_abs_; }
+    [[nodiscard]] size_t max_max_abs_idx() const { return max_max_abs_idx_; }
+    [[nodiscard]] uint64_t revision() const { return revision_; }
     [[nodiscard]] const Grid2D& grid() const { return grid_; }
     [[nodiscard]] bool is_valid(size_t i) const { return valid_[i]; }
 
@@ -50,7 +58,7 @@ public:
     [[nodiscard]] size_t size() const { return params_.size(); }
 
     // Count missing (NaN) trees
-    [[nodiscard]] int n_missing() const { return params_.count_nan(); }
+    [[nodiscard]] int n_missing() const { return missing_count_; }
 
     // Regularization term (max absolute position)
     [[nodiscard]] float reg() const;
@@ -61,13 +69,26 @@ public:
     // Recompute all cached data
     void recompute_cache();
 
-private:
+    // Copy data from another solution without changing structure
+    void copy_from(const Solution& other);
+
+    // Validate cached data against params (optional grid check)
+    [[nodiscard]] bool validate_cache(float tol = 1e-5f, bool check_grid = false) const;
+
+protected:
+    friend class Problem;
+    static std::atomic<uint64_t> next_revision_;
     TreeParamsSoA params_;
     std::vector<Figure> figures_;
     std::vector<Vec2> centers_;
     std::vector<AABB> aabbs_;
+    std::vector<float> max_abs_;
+    float max_max_abs_{0.0f};
+    size_t max_max_abs_idx_{static_cast<size_t>(-1)};
     std::vector<char> valid_;
+    int missing_count_{0};
     Grid2D grid_;
+    uint64_t revision_{0};
 
     void update_cache_for(size_t i);
 };
@@ -82,21 +103,49 @@ struct SolutionEval {
     float bounds_violation{0.0f};
 
     // Intersection map (cached for incremental updates)
-    std::vector<std::unordered_map<int, float>> intersection_map;
+    using IntersectionList = std::vector<std::pair<Index, float>>;
+    using IntersectionMap = std::vector<std::shared_ptr<IntersectionList>>;
+    IntersectionMap intersection_map;
 
     // Cached bounds for incremental objective updates
-    int valid_count{0};
+    int16_t valid_count{0};
     float min_x{0.0f};
     float max_x{0.0f};
     float min_y{0.0f};
     float max_y{0.0f};
-    int min_x_idx{-1};
-    int max_x_idx{-1};
-    int min_y_idx{-1};
-    int max_y_idx{-1};
+    Index min_x_idx{-1};
+    Index max_x_idx{-1};
+    Index min_y_idx{-1};
+    Index max_y_idx{-1};
+    mutable uint64_t score_cache_revision{std::numeric_limits<uint64_t>::max()};
+    mutable float score_cache_mu{std::numeric_limits<float>::quiet_NaN()};
+    mutable float score_cache_value{0.0f};
+    mutable bool score_cache_valid{false};
+
+    void copy_from(const SolutionEval& other) {
+        solution.copy_from(other.solution);
+        objective = other.objective;
+        intersection_violation = other.intersection_violation;
+        bounds_violation = other.bounds_violation;
+        valid_count = other.valid_count;
+        min_x = other.min_x;
+        max_x = other.max_x;
+        min_y = other.min_y;
+        max_y = other.max_y;
+        min_x_idx = other.min_x_idx;
+        max_x_idx = other.max_x_idx;
+        min_y_idx = other.min_y_idx;
+        max_y_idx = other.max_y_idx;
+
+        if (intersection_map.size() != other.intersection_map.size()) {
+            intersection_map.resize(other.intersection_map.size());
+        }
+        std::copy(other.intersection_map.begin(), other.intersection_map.end(), intersection_map.begin());
+    }
 
     [[nodiscard]] float total_violation() const {
-        return intersection_violation + bounds_violation;
+        float v = intersection_violation + bounds_violation;
+        return v > 0.0f ? v : 0.0f;
     }
 
     [[nodiscard]] int n_missing() const {
