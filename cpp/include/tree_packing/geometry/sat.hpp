@@ -31,6 +31,17 @@ struct Projection {
     bool assume_valid = false
 );
 
+// Compute intersection score between two triangles using precomputed normals
+[[nodiscard]] float triangles_intersection_score_from_normals(
+    const Triangle& t0,
+    const Triangle& t1,
+    const std::array<Vec2, 3>& n0,
+    const std::array<Vec2, 3>& n1,
+    float eps = EPSILON,
+    bool assume_valid = false
+);
+
+
 // Compute intersection score between two figures (unions of triangles)
 // Sums up all pairwise triangle intersection scores
 [[nodiscard]] float figure_intersection_score(
@@ -40,6 +51,18 @@ struct Projection {
     bool allow_negative = false,
     bool assume_valid = false
 );
+
+// Compute intersection score between two figures using precomputed normals
+[[nodiscard]] float figure_intersection_score_from_normals(
+    const Figure& f0,
+    const Figure& f1,
+    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
+    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n1,
+    float eps = EPSILON,
+    bool allow_negative = false,
+    bool assume_valid = false
+);
+
 
 // Compute full intersection matrix between all pairs of figures
 // matrix[i * n + j] = intersection score between figure i and j

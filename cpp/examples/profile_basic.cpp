@@ -55,11 +55,7 @@ int main(int argc, char** argv) {
     std::any state = sa.init_state(eval);
     GlobalState global_state(seed, eval);
 
-    {
-        SolutionEval out;
-        sa.run(eval, state, global_state, num_iterations, out);
-        eval = out;
-    }
+    sa.run(eval, state, global_state, num_iterations);
 
     std::cout << "Done: iterations=" << global_state.iteration()
               << " best_feasible=" << global_state.best_feasible_score()

@@ -163,7 +163,9 @@ void Problem::eval_inplace(const Solution& solution, SolutionEval& eval) const {
 
     // Compute intersection constraint with sparse map
     IntersectionConstraint intersection;
-    eval.intersection_violation = intersection.eval(solution, eval.intersection_map);
+    eval.intersection_violation = intersection.eval(
+        solution, eval.intersection_map, &eval.intersection_count
+    );
 
     // Compute bounds constraint
     BoundsConstraint bounds(min_pos_, max_pos_);
@@ -279,7 +281,9 @@ void Problem::eval_update_inplace(
         solution,
         out_map,
         modified_indices,
-        prev_eval.intersection_violation
+        prev_eval.intersection_violation,
+        prev_eval.intersection_count,
+        &eval.intersection_count
     );
 
     // Bounds constraint doesn't need incremental update (it's fast)
@@ -303,40 +307,23 @@ void Problem::update_and_eval(
         auto i = indices[k];
         TreeParams p = new_params.get(k);
 
-        // validity
-        if (!eval.solution.valid_[i]) {
-            eval.solution.valid_[i] = true;
-            eval.solution.missing_count_ -= 1;
-            eval.valid_count += 1;
-        }
-        // figure
-        eval.solution.figures_[i] = params_to_figure(p);
-        // revision
-        // grid
-        eval.solution.grid_.update(i, p.pos);
-        // max_abs_
-        AABB aabb;
-        aabb.expand(eval.solution.figures_[i]);
-        eval.solution.aabbs_[i] = aabb;
-        eval.solution.max_abs_[i] = compute_aabb_max_abs(eval.solution.aabbs_[i]);
-        // max_max_abs_ & max_max_abs_idx_
-        if (eval.solution.max_max_abs_idx_ == i) {
-            recompute_max_abs = true;
-        } else if (eval.solution.max_abs_[i] > eval.solution.max_max_abs_) {
-            eval.solution.max_max_abs_ = i;
-            eval.solution.max_max_abs_ = eval.solution.max_abs_[i];
-        }
-        // center
-        eval.solution.centers_[i] = get_tree_center(p.pos.x, p.pos.y, p.angle);
-        // params
+        bool old_valid = eval.solution.valid_[i];
         eval.solution.params_.x[i] = p.pos.x;
         eval.solution.params_.y[i] = p.pos.y;
         eval.solution.params_.angle[i] = p.angle;
+        eval.solution.update_cache_for(static_cast<size_t>(i));
+        bool new_valid = eval.solution.valid_[i];
+        if (old_valid != new_valid) {
+            eval.valid_count += new_valid ? 1 : -1;
+        }
+        if (eval.solution.max_max_abs_idx_ == static_cast<size_t>(i)) {
+            recompute_max_abs = true;
+        }
     }
     if (recompute_max_abs) {
         float max_abs = 0.0f;
-        int idx = 0;
-        for (int i=0; i<eval.solution.max_abs_.size(); i++) {
+        size_t idx = static_cast<size_t>(-1);
+        for (size_t i = 0; i < eval.solution.max_abs_.size(); ++i) {
             float v = eval.solution.max_abs_[i];
             if (v > max_abs) {
                 max_abs = v;
@@ -370,8 +357,11 @@ void Problem::update_and_eval(
         eval.solution,
         eval.intersection_map,
         indices,
-        eval.intersection_violation
+        eval.intersection_violation,
+        eval.intersection_count,
+        &eval.intersection_count
     );
+    eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Problem::remove_and_eval(
@@ -383,24 +373,10 @@ void Problem::remove_and_eval(
     for (int idx : indices) {
         size_t i = static_cast<size_t>(idx);
         bool was_valid = eval.solution.valid_[i];
+        eval.solution.set_nan(i);
         if (was_valid) {
-            eval.solution.valid_[i] = false;
-            eval.solution.missing_count_ += 1;
             eval.valid_count -= 1;
         }
-
-        eval.solution.params_.set_nan(i);
-
-        for (auto& tri : eval.solution.figures_[i].triangles) {
-            tri.v0 = Vec2::nan();
-            tri.v1 = Vec2::nan();
-            tri.v2 = Vec2::nan();
-        }
-        eval.solution.centers_[i] = Vec2::nan();
-        eval.solution.aabbs_[i] = AABB{};
-        eval.solution.max_abs_[i] = 0.0f;
-        eval.solution.grid_.update(static_cast<int>(i), Vec2::nan());
-
         if (eval.solution.max_max_abs_idx_ == i) {
             recompute_max_abs = true;
         }
@@ -408,8 +384,8 @@ void Problem::remove_and_eval(
 
     if (recompute_max_abs) {
         float max_abs = 0.0f;
-        int idx = 0;
-        for (int i = 0; i < eval.solution.max_abs_.size(); ++i) {
+        size_t idx = static_cast<size_t>(-1);
+        for (size_t i = 0; i < eval.solution.max_abs_.size(); ++i) {
             float v = eval.solution.max_abs_[i];
             if (v > max_abs) {
                 max_abs = v;
@@ -417,7 +393,7 @@ void Problem::remove_and_eval(
             }
         }
         eval.solution.max_max_abs_ = max_abs;
-        eval.solution.max_max_abs_idx_ = static_cast<size_t>(idx);
+        eval.solution.max_max_abs_idx_ = idx;
     }
 
     auto obj_bounds = compute_bounds_full(eval.solution);
@@ -443,8 +419,11 @@ void Problem::remove_and_eval(
         eval.solution,
         eval.intersection_map,
         indices,
-        eval.intersection_violation
+        eval.intersection_violation,
+        eval.intersection_count,
+        &eval.intersection_count
     );
+    eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 float Problem::score(const SolutionEval& solution_eval, const GlobalState& global_state) const {

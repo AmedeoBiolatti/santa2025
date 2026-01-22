@@ -14,7 +14,8 @@ public:
     // Full evaluation (compute sparse intersection map)
     [[nodiscard]] float eval(
         const Solution& solution,
-        SolutionEval::IntersectionMap& map
+        SolutionEval::IntersectionMap& map,
+        int* out_count = nullptr
     ) const;
 
     // Incremental evaluation (update map for modified indices)
@@ -22,7 +23,9 @@ public:
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         const std::vector<int>& modified_indices,
-        float prev_total
+        float prev_total,
+        int prev_count,
+        int* out_count = nullptr
     ) const;
 
 private:
@@ -30,6 +33,16 @@ private:
     [[nodiscard]] float compute_pair_score(
         const Figure& f0,
         const Figure& f1,
+        const Vec2& c0,
+        const Vec2& c1
+    ) const;
+
+    // Compute intersection score using cached triangle normals
+    [[nodiscard]] float compute_pair_score_from_normals(
+        const Figure& f0,
+        const Figure& f1,
+        const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
+        const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n1,
         const Vec2& c0,
         const Vec2& c1
     ) const;

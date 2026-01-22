@@ -13,12 +13,13 @@ public:
     std::any init_state(const SolutionEval& solution) override;
 
     void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) override;
+
+    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
@@ -29,8 +30,10 @@ private:
 
 // State for NoiseOptimizer
 struct NoiseState {
-    Solution scratch;
     std::vector<int> indices;
+    int last_idx{-1};
+    TreeParams last_params;
+    bool has_last{false};
 };
 
 }  // namespace tree_packing

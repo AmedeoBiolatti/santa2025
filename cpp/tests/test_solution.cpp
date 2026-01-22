@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "tree_packing/core/solution.hpp"
+#include "tree_packing/core/tree.hpp"
 
 using namespace tree_packing;
 using Catch::Approx;
@@ -31,6 +32,7 @@ TEST_CASE("Solution construction", "[solution]") {
 TEST_CASE("Solution modification", "[solution]") {
     SECTION("Set params") {
         Solution sol = Solution::init_random(5, 10.0f, 42);
+        auto before_normals = sol.normals()[2];
 
         TreeParams new_params(1.0f, 2.0f, 0.5f);
         sol.set_params(2, new_params);
@@ -39,6 +41,22 @@ TEST_CASE("Solution modification", "[solution]") {
         REQUIRE(retrieved.pos.x == Approx(1.0f));
         REQUIRE(retrieved.pos.y == Approx(2.0f));
         REQUIRE(retrieved.angle == Approx(0.5f));
+
+        std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES> expected_normals{};
+        get_tree_normals(new_params.angle, expected_normals);
+        const auto& after_normals = sol.normals()[2];
+        bool changed = false;
+        for (size_t i = 0; i < TREE_NUM_TRIANGLES; ++i) {
+            for (size_t j = 0; j < 3; ++j) {
+                if (before_normals[i][j].x != after_normals[i][j].x ||
+                    before_normals[i][j].y != after_normals[i][j].y) {
+                    changed = true;
+                }
+                REQUIRE(after_normals[i][j].x == Approx(expected_normals[i][j].x).margin(1e-6f));
+                REQUIRE(after_normals[i][j].y == Approx(expected_normals[i][j].y).margin(1e-6f));
+            }
+        }
+        REQUIRE(changed);
     }
 
     SECTION("Set NaN") {

@@ -32,17 +32,14 @@ void RandomRecreate::get_removed_indices(const TreeParamsSoA& params, std::vecto
 }
 
 void RandomRecreate::apply(
-    const SolutionEval& solution,
+    SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng,
-    SolutionEval& out
+    RNG& rng
 ) {
-    if (out.solution.revision() != solution.solution.revision()) {
-        out.solution.copy_from(solution.solution);
-    }
-    const auto& params = out.solution.params();
-    float max_abs = out.solution.max_max_abs();
+    (void)global_state;
+    const auto& params = solution.solution.params();
+    float max_abs = solution.solution.max_max_abs();
 
     // Find removed (NaN) indices
     auto* rec_state = std::any_cast<RandomRecreateState>(&state);
@@ -75,18 +72,33 @@ void RandomRecreate::apply(
     indices = removed;
     indices.resize(n_recreate);
 
+    rec_state->prev_params.resize(indices.size());
+    for (size_t k = 0; k < indices.size(); ++k) {
+        int idx = indices[k];
+        if (idx < 0 || static_cast<size_t>(idx) >= params.size()) {
+            rec_state->prev_params.set_nan(k);
+            continue;
+        }
+        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
+            rec_state->prev_params.set(k, solution.solution.get_params(static_cast<size_t>(idx)));
+        } else {
+            rec_state->prev_params.set_nan(k);
+        }
+    }
+
     // Create new solution with updated params
-    for (int idx : indices) {
+    TreeParamsSoA new_params(static_cast<size_t>(n_recreate));
+    for (int i = 0; i < n_recreate; ++i) {
         TreeParams p{
             rng.uniform(minval, maxval),
             rng.uniform(minval, maxval),
             rng.uniform(-PI, PI)
         };
-        out.solution.set_params(static_cast<size_t>(idx), p);
+        new_params.set(static_cast<size_t>(i), p);
     }
 
     // Evaluate the new solution
-    problem_->eval_inplace(out.solution, out);
+    problem_->update_and_eval(solution, indices, new_params);
 
     // Update state
     rec_state->iteration++;
@@ -95,6 +107,37 @@ void RandomRecreate::apply(
         std::cout << "[RandomRecreate] iter=" << rec_state->iteration
                   << " removed=" << removed.size()
                   << " recreated=" << n_recreate << "\n";
+    }
+}
+
+void RandomRecreate::rollback(SolutionEval& solution, std::any& state) {
+    auto* rec_state = std::any_cast<RandomRecreateState>(&state);
+    if (!rec_state) {
+        return;
+    }
+    const auto& indices = rec_state->indices;
+    if (indices.empty()) {
+        return;
+    }
+    std::vector<int> valid_indices;
+    std::vector<int> invalid_indices;
+    TreeParamsSoA valid_params;
+    for (size_t k = 0; k < indices.size(); ++k) {
+        int idx = indices[k];
+        if (rec_state->prev_params.is_nan(k)) {
+            invalid_indices.push_back(idx);
+        } else {
+            size_t out_idx = valid_indices.size();
+            valid_indices.push_back(idx);
+            valid_params.resize(valid_indices.size());
+            valid_params.set(out_idx, rec_state->prev_params.get(k));
+        }
+    }
+    if (!invalid_indices.empty()) {
+        problem_->remove_and_eval(solution, invalid_indices);
+    }
+    if (!valid_indices.empty()) {
+        problem_->update_and_eval(solution, valid_indices, valid_params);
     }
 }
 

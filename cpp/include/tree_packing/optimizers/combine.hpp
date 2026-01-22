@@ -16,12 +16,13 @@ public:
     std::any init_state(const SolutionEval& solution) override;
 
     void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) override;
+
+    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
@@ -40,12 +41,13 @@ public:
     std::any init_state(const SolutionEval& solution) override;
 
     void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) override;
+
+    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
@@ -65,12 +67,13 @@ public:
     std::any init_state(const SolutionEval& solution) override;
 
     void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) override;
+
+    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
@@ -94,12 +97,13 @@ public:
     std::any init_state(const SolutionEval& solution) override;
 
     void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) override;
+
+    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 

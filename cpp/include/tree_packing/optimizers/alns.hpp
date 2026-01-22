@@ -13,7 +13,8 @@ struct ALNSState {
     std::vector<std::any> recreate_states;
     std::vector<float> ruin_weights;
     std::vector<float> recreate_weights;
-    SolutionEval ruined;
+    int last_ruin_idx{-1};
+    int last_recreate_idx{-1};
 };
 
 // Adaptive Large Neighborhood Search optimizer
@@ -34,12 +35,13 @@ public:
     std::any init_state(const SolutionEval& solution) override;
 
     void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) override;
+
+    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 

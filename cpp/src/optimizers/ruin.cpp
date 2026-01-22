@@ -19,16 +19,13 @@ std::any RandomRuin::init_state(const SolutionEval& solution) {
 }
 
 void RandomRuin::apply(
-    const SolutionEval& solution,
+    SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng,
-    SolutionEval& out
+    RNG& rng
 ) {
-    if (out.solution.revision() != solution.solution.revision()) {
-        out.solution.copy_from(solution.solution);
-    }
-    const auto& params = out.solution.params();
+    (void)global_state;
+    const auto& params = solution.solution.params();
     size_t n = params.size();
 
     // Select random indices to remove
@@ -41,15 +38,54 @@ void RandomRuin::apply(
     rng.choice(static_cast<int>(n), n_remove_, indices);
 
     // Create new solution with updated params
-    for (int idx : indices) {
-        out.solution.set_nan(static_cast<size_t>(idx));
+    ruin_state->prev_params.resize(indices.size());
+    for (size_t k = 0; k < indices.size(); ++k) {
+        int idx = indices[k];
+        if (idx < 0 || static_cast<size_t>(idx) >= n) {
+            ruin_state->prev_params.set_nan(k);
+            continue;
+        }
+        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
+            ruin_state->prev_params.set(k, solution.solution.get_params(static_cast<size_t>(idx)));
+        } else {
+            ruin_state->prev_params.set_nan(k);
+        }
     }
-
-    // Evaluate the new solution
-    problem_->eval_inplace(out.solution, out);
+    problem_->remove_and_eval(solution, indices);
 
     if (verbose_) {
         std::cout << "[RandomRuin] removed=" << indices.size() << "\n";
+    }
+}
+
+void RandomRuin::rollback(SolutionEval& solution, std::any& state) {
+    auto* ruin_state = std::any_cast<RuinState>(&state);
+    if (!ruin_state) {
+        return;
+    }
+    const auto& indices = ruin_state->indices;
+    if (indices.empty()) {
+        return;
+    }
+    std::vector<int> valid_indices;
+    std::vector<int> invalid_indices;
+    TreeParamsSoA valid_params;
+    for (size_t k = 0; k < indices.size(); ++k) {
+        int idx = indices[k];
+        if (ruin_state->prev_params.is_nan(k)) {
+            invalid_indices.push_back(idx);
+        } else {
+            size_t out_idx = valid_indices.size();
+            valid_indices.push_back(idx);
+            valid_params.resize(valid_indices.size());
+            valid_params.set(out_idx, ruin_state->prev_params.get(k));
+        }
+    }
+    if (!invalid_indices.empty()) {
+        problem_->remove_and_eval(solution, invalid_indices);
+    }
+    if (!valid_indices.empty()) {
+        problem_->update_and_eval(solution, valid_indices, valid_params);
     }
 }
 
@@ -123,16 +159,13 @@ std::any SpatialRuin::init_state(const SolutionEval& solution) {
 }
 
 void SpatialRuin::apply(
-    const SolutionEval& solution,
+    SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng,
-    SolutionEval& out
+    RNG& rng
 ) {
-    if (out.solution.revision() != solution.solution.revision()) {
-        out.solution.copy_from(solution.solution);
-    }
-    const auto& params = out.solution.params();
+    (void)global_state;
+    const auto& params = solution.solution.params();
 
     // Select random point and find closest trees
     Vec2 point = random_point(params, rng);
@@ -145,16 +178,55 @@ void SpatialRuin::apply(
     select_closest(params, point, indices, ruin_state->distances);
 
     // Create new solution with updated params
-    for (int idx : indices) {
-        out.solution.set_nan(static_cast<size_t>(idx));
+    ruin_state->prev_params.resize(indices.size());
+    for (size_t k = 0; k < indices.size(); ++k) {
+        int idx = indices[k];
+        if (idx < 0 || static_cast<size_t>(idx) >= params.size()) {
+            ruin_state->prev_params.set_nan(k);
+            continue;
+        }
+        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
+            ruin_state->prev_params.set(k, solution.solution.get_params(static_cast<size_t>(idx)));
+        } else {
+            ruin_state->prev_params.set_nan(k);
+        }
     }
-
-    // Evaluate the new solution
-    problem_->eval_inplace(out.solution, out);
+    problem_->remove_and_eval(solution, indices);
 
     if (verbose_) {
         std::cout << "[SpatialRuin] removed=" << indices.size()
                   << " point=(" << point.x << "," << point.y << ")\n";
+    }
+}
+
+void SpatialRuin::rollback(SolutionEval& solution, std::any& state) {
+    auto* ruin_state = std::any_cast<RuinState>(&state);
+    if (!ruin_state) {
+        return;
+    }
+    const auto& indices = ruin_state->indices;
+    if (indices.empty()) {
+        return;
+    }
+    std::vector<int> valid_indices;
+    std::vector<int> invalid_indices;
+    TreeParamsSoA valid_params;
+    for (size_t k = 0; k < indices.size(); ++k) {
+        int idx = indices[k];
+        if (ruin_state->prev_params.is_nan(k)) {
+            invalid_indices.push_back(idx);
+        } else {
+            size_t out_idx = valid_indices.size();
+            valid_indices.push_back(idx);
+            valid_params.resize(valid_indices.size());
+            valid_params.set(out_idx, ruin_state->prev_params.get(k));
+        }
+    }
+    if (!invalid_indices.empty()) {
+        problem_->remove_and_eval(solution, invalid_indices);
+    }
+    if (!valid_indices.empty()) {
+        problem_->update_and_eval(solution, valid_indices, valid_params);
     }
 }
 

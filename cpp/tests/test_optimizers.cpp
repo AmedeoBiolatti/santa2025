@@ -117,10 +117,9 @@ TEST_CASE("RandomRuin", "[optimizers]") {
         std::any state;
         GlobalState global_state(42);
 
-        SolutionEval new_eval;
-        ruin.apply(eval, state, global_state, rng, new_eval);
+        ruin.apply(eval, state, global_state, rng);
 
-        REQUIRE(new_eval.n_missing() == 3);
+        REQUIRE(eval.n_missing() == 3);
     }
 }
 
@@ -144,11 +143,10 @@ TEST_CASE("RandomRecreate", "[optimizers]") {
         std::any state = recreate.init_state(eval);
         GlobalState global_state(42);
 
-        SolutionEval new_eval;
-        recreate.apply(eval, state, global_state, rng, new_eval);
+        recreate.apply(eval, state, global_state, rng);
 
         // Should have recreated 2 trees
-        REQUIRE(new_eval.n_missing() == 1);
+        REQUIRE(eval.n_missing() == 1);
     }
 }
 
@@ -170,11 +168,10 @@ TEST_CASE("ALNS", "[optimizers]") {
         GlobalState global_state(42);
         RNG rng(42);
 
-        SolutionEval new_eval;
-        alns.apply(eval, state, global_state, rng, new_eval);
+        alns.apply(eval, state, global_state, rng);
 
         // Should have same number of trees (ruin + recreate)
-        REQUIRE(new_eval.n_missing() == 0);
+        REQUIRE(eval.n_missing() == 0);
     }
 }
 
@@ -200,9 +197,7 @@ TEST_CASE("SimulatedAnnealing", "[optimizers]") {
         // Run several iterations
         for (int i = 0; i < 10; ++i) {
             RNG rng(global_state.split_rng());
-            SolutionEval new_eval;
-            sa.apply(eval, state, global_state, rng, new_eval);
-            eval = new_eval;
+            sa.apply(eval, state, global_state, rng);
         }
 
         // Check that state has updated temperature
@@ -238,13 +233,10 @@ TEST_CASE("Integration test", "[optimizers]") {
         // Run optimization
         for (int i = 0; i < 100; ++i) {
             RNG rng(global_state.split_rng());
-            SolutionEval new_eval;
-            sa.apply(eval, state, global_state, rng, new_eval);
+            sa.apply(eval, state, global_state, rng);
 
-            global_state.maybe_update_best(problem, new_eval);
+            global_state.maybe_update_best(problem, eval);
             global_state.next();
-
-            eval = new_eval;
         }
 
         // Score should improve or stay same (not necessarily improve in 100 iters)

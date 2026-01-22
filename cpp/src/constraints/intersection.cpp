@@ -67,11 +67,31 @@ float IntersectionConstraint::compute_pair_score(
     return figure_intersection_score(f0, f1, EPSILON, false, true);
 }
 
+float IntersectionConstraint::compute_pair_score_from_normals(
+    const Figure& f0,
+    const Figure& f1,
+    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
+    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n1,
+    const Vec2& c0,
+    const Vec2& c1
+) const {
+    Vec2 diff = c0 - c1;
+    float dist2 = diff.length_squared();
+
+    if (dist2 >= THR2) {
+        return 0.0f;
+    }
+
+    return figure_intersection_score_from_normals(f0, f1, n0, n1, EPSILON, false, true);
+}
+
 float IntersectionConstraint::eval(
     const Solution& solution,
-    SolutionEval::IntersectionMap& map
+    SolutionEval::IntersectionMap& map,
+    int* out_count
 ) const {
     const auto& figures = solution.figures();
+    const auto& normals = solution.normals();
     const auto& centers = solution.centers();
     const auto& grid = solution.grid();
     size_t n = figures.size();
@@ -88,6 +108,7 @@ float IntersectionConstraint::eval(
     }
 
     float total_violation = 0.0f;
+    int count = 0;
 
     auto& work = scratch();
     auto& candidates = work.candidates;
@@ -114,14 +135,25 @@ float IntersectionConstraint::eval(
             if (seen[c_idx] == stamp) continue;
             seen[c_idx] = stamp;
 
-            float score = compute_pair_score(figures[i], figures[c_idx], centers[i], centers[c_idx]);
+            float score = compute_pair_score_from_normals(
+                figures[i],
+                figures[c_idx],
+                normals[i],
+                normals[c_idx],
+                centers[i],
+                centers[c_idx]
+            );
             if (score <= 0.0f) continue;
             map[i]->emplace_back(static_cast<Index>(c_idx), score);
             map[c_idx]->emplace_back(static_cast<Index>(i_idx), score);
             total_violation += 2.0f * score;  // Count both directions
+            count += 2;
         }
     }
 
+    if (out_count) {
+        *out_count = count;
+    }
     return total_violation;
 }
 
@@ -129,14 +161,18 @@ float IntersectionConstraint::eval_update(
     const Solution& solution,
     SolutionEval::IntersectionMap& map,
     const std::vector<int>& modified_indices,
-    float prev_total
+    float prev_total,
+    int prev_count,
+    int* out_count
 ) const {
     const auto& figures = solution.figures();
+    const auto& normals = solution.normals();
     const auto& centers = solution.centers();
     const auto& new_grid = solution.grid();
     size_t n = figures.size();
 
     float total = prev_total;
+    int count = prev_count;
     int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * new_grid.capacity();
     auto& work = scratch();
     auto& is_modified = work.is_modified;
@@ -155,12 +191,14 @@ float IntersectionConstraint::eval_update(
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
 
         auto& row = ensure_unique_row(map, static_cast<size_t>(idx));
+        size_t row_size = row.size();
         for (const auto& [c, score] : row) {
             total -= 2.0f * score;
             float removed = 0.0f;
             auto& neighbor = ensure_unique_row(map, static_cast<size_t>(c));
             erase_pair(neighbor, idx, removed);
         }
+        count -= static_cast<int>(row_size) * 2;
         row.clear();
         row.reserve(reserve_size);
     }
@@ -190,17 +228,31 @@ float IntersectionConstraint::eval_update(
             if (seen[c_idx] == stamp) continue;
             seen[c_idx] = stamp;
 
-            float score = compute_pair_score(
-                figures[idx], figures[c_idx],
-                centers[idx], centers[c_idx]
+            float score = compute_pair_score_from_normals(
+                figures[idx],
+                figures[c_idx],
+                normals[idx],
+                normals[c_idx],
+                centers[idx],
+                centers[c_idx]
             );
             if (score <= 0.0f) continue;
             ensure_unique_row(map, static_cast<size_t>(idx)).emplace_back(static_cast<Index>(c_idx), score);
             ensure_unique_row(map, static_cast<size_t>(c_idx)).emplace_back(static_cast<Index>(idx), score);
             total += 2.0f * score;
+            count += 2;
         }
     }
 
+    if (count < 0) {
+        count = 0;
+    }
+    if (count == 0) {
+        total = 0.0f;
+    }
+    if (out_count) {
+        *out_count = count;
+    }
     return total;
 }
 

@@ -37,6 +37,7 @@ std::any SimulatedAnnealing::init_state(const SolutionEval& solution) {
     state.inner_state = inner_optimizer_->init_state(solution);
     state.n_accepted = 0;
     state.n_rejected = 0;
+    state.last_accept = false;
     return state;
 }
 
@@ -61,11 +62,10 @@ float SimulatedAnnealing::compute_temperature(int iteration) const {
 }
 
 void SimulatedAnnealing::apply(
-    const SolutionEval& solution,
+    SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng,
-    SolutionEval& out
+    RNG& rng
 ) {
     auto* sa_state = std::any_cast<SAState>(&state);
     if (!sa_state) {
@@ -82,15 +82,17 @@ void SimulatedAnnealing::apply(
         }
     }
 
+    // Compute current score before mutation
+    float current_score = problem_->score(solution, global_state);
+
     // Apply inner optimizer
     RNG inner_rng = rng.split();
     inner_optimizer_->apply(
-        solution, sa_state->inner_state, global_state, inner_rng, out
+        solution, sa_state->inner_state, global_state, inner_rng
     );
 
     // Compute acceptance probability
-    float current_score = problem_->score(solution, global_state);
-    float candidate_score = problem_->score(out, global_state);
+    float candidate_score = problem_->score(solution, global_state);
     float delta = candidate_score - current_score;
 
     float temperature = compute_temperature(sa_state->iteration);
@@ -100,9 +102,10 @@ void SimulatedAnnealing::apply(
     if (accept) {
         sa_state->n_accepted++;
     } else {
-        out = solution;
+        inner_optimizer_->rollback(solution, sa_state->inner_state);
         sa_state->n_rejected++;
     }
+    sa_state->last_accept = accept;
 
     // Update state
     sa_state->iteration++;
@@ -115,6 +118,17 @@ void SimulatedAnnealing::apply(
         std::cout << "[SimulatedAnnealing] temp=" << temperature << " acc-rate=" << rate;
         std::cout << " | score: " << current_score << "->" << candidate_score << " prob=" << accept_prob;
         std::cout << (accept ? "👍" : "👎") << "\n";
+    }
+}
+
+void SimulatedAnnealing::rollback(SolutionEval& solution, std::any& state) {
+    auto* sa_state = std::any_cast<SAState>(&state);
+    if (!sa_state) {
+        return;
+    }
+    if (sa_state->last_accept) {
+        inner_optimizer_->rollback(solution, sa_state->inner_state);
+        sa_state->last_accept = false;
     }
 }
 

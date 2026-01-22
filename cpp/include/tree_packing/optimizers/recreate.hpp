@@ -18,12 +18,13 @@ public:
     std::any init_state(const SolutionEval& solution) override;
 
     void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) override;
+
+    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
@@ -42,6 +43,7 @@ struct RandomRecreateState {
     int iteration{0};
     std::vector<int> removed;
     std::vector<int> indices;
+    TreeParamsSoA prev_params;
 };
 
 }  // namespace tree_packing

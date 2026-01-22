@@ -35,6 +35,21 @@ bool figure_equal(const Figure& a, const Figure& b, float tol) {
     return true;
 }
 
+bool normals_equal(
+    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& a,
+    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& b,
+    float tol
+) {
+    for (size_t i = 0; i < TREE_NUM_TRIANGLES; ++i) {
+        for (size_t j = 0; j < 3; ++j) {
+            if (!vec2_equal(a[i][j], b[i][j], tol)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool aabb_is_default(const AABB& aabb) {
     return aabb.min.x == std::numeric_limits<float>::max() &&
            aabb.min.y == std::numeric_limits<float>::max() &&
@@ -61,6 +76,7 @@ Solution::Solution(size_t num_trees) {
     centers_.resize(num_trees);
     aabbs_.resize(num_trees);
     max_abs_.resize(num_trees, 0.0f);
+    normals_.resize(num_trees);
     max_max_abs_ = 0.0f;
     max_max_abs_idx_ = static_cast<size_t>(-1);
     valid_.resize(num_trees, false);
@@ -104,6 +120,7 @@ Solution Solution::init(const TreeParamsSoA& params, int grid_n, float grid_size
     sol.centers_.resize(params.size());
     sol.aabbs_.resize(params.size());
     sol.max_abs_.resize(params.size(), 0.0f);
+    sol.normals_.resize(params.size());
     sol.valid_.resize(params.size(), false);
 
     // Compute figures and centers
@@ -111,6 +128,7 @@ Solution Solution::init(const TreeParamsSoA& params, int grid_n, float grid_size
     get_tree_centers(sol.params_, sol.centers_);
     for (size_t i = 0; i < params.size(); ++i) {
         sol.valid_[i] = !sol.params_.is_nan(i);
+        get_tree_normals(sol.params_.angle[i], sol.normals_[i]);
         if (sol.valid_[i]) {
             sol.aabbs_[i] = compute_aabb(sol.figures_[i]);
             sol.max_abs_[i] = compute_aabb_max_abs(sol.aabbs_[i]);
@@ -159,6 +177,11 @@ void Solution::set_nan(size_t i) {
         tri.v1 = Vec2::nan();
         tri.v2 = Vec2::nan();
     }
+    for (auto& tri_normals : normals_[i]) {
+        tri_normals[0] = Vec2::nan();
+        tri_normals[1] = Vec2::nan();
+        tri_normals[2] = Vec2::nan();
+    }
     centers_[i] = Vec2::nan();
     grid_.update(static_cast<int>(i), Vec2::nan());
 }
@@ -189,8 +212,12 @@ void Solution::recompute_cache() {
     if (max_abs_.size() != params_.size()) {
         max_abs_.resize(params_.size(), 0.0f);
     }
+    if (normals_.size() != params_.size()) {
+        normals_.resize(params_.size());
+    }
     for (size_t i = 0; i < params_.size(); ++i) {
         valid_[i] = !params_.is_nan(i);
+        get_tree_normals(params_.angle[i], normals_[i]);
         if (valid_[i]) {
             aabbs_[i] = compute_aabb(figures_[i]);
             max_abs_[i] = compute_aabb_max_abs(aabbs_[i]);
@@ -215,6 +242,7 @@ void Solution::update_cache_for(size_t i) {
     figures_[i] = params_to_figure(p);
     centers_[i] = get_tree_center(p);
     valid_[i] = !params_.is_nan(i);
+    get_tree_normals(p.angle, normals_[i]);
     if (valid_[i]) {
         aabbs_[i] = compute_aabb(figures_[i]);
         max_abs_[i] = compute_aabb_max_abs(aabbs_[i]);
@@ -242,6 +270,7 @@ void Solution::copy_from(const Solution& other) {
     centers_ = other.centers_;
     aabbs_ = other.aabbs_;
     max_abs_ = other.max_abs_;
+    normals_ = other.normals_;
     max_max_abs_ = other.max_max_abs_;
     max_max_abs_idx_ = other.max_max_abs_idx_;
     valid_ = other.valid_;
@@ -253,7 +282,7 @@ void Solution::copy_from(const Solution& other) {
 bool Solution::validate_cache(float tol, bool check_grid) const {
     size_t n = params_.size();
     if (figures_.size() != n || centers_.size() != n || aabbs_.size() != n ||
-        max_abs_.size() != n || valid_.size() != n) {
+        max_abs_.size() != n || normals_.size() != n || valid_.size() != n) {
         return false;
     }
 
@@ -261,6 +290,10 @@ bool Solution::validate_cache(float tol, bool check_grid) const {
     std::vector<Vec2> expected_centers(n);
     params_to_figures(params_, expected_figures);
     get_tree_centers(params_, expected_centers);
+    std::vector<std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>> expected_normals(n);
+    for (size_t i = 0; i < n; ++i) {
+        get_tree_normals(params_.angle[i], expected_normals[i]);
+    }
 
     int expected_missing = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -272,6 +305,9 @@ bool Solution::validate_cache(float tol, bool check_grid) const {
             return false;
         }
         if (!vec2_equal(centers_[i], expected_centers[i], tol)) {
+            return false;
+        }
+        if (!normals_equal(normals_[i], expected_normals[i], tol)) {
             return false;
         }
 

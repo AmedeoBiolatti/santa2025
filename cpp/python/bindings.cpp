@@ -107,6 +107,30 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
                 self.angle.assign(ptr, ptr + buf.size);
             });
 
+    m.def("params_to_figures", [](const tree_packing::TreeParamsSoA& params) {
+        std::vector<tree_packing::Figure> figures;
+        figures.resize(params.size());
+        tree_packing::params_to_figures(params, figures);
+
+        py::ssize_t n = static_cast<py::ssize_t>(figures.size());
+        py::ssize_t t = static_cast<py::ssize_t>(tree_packing::TREE_NUM_TRIANGLES);
+        py::array_t<float> arr({n, t, static_cast<py::ssize_t>(3), static_cast<py::ssize_t>(2)});
+        auto buf = arr.mutable_unchecked<4>();
+        for (py::ssize_t i = 0; i < n; ++i) {
+            const auto& fig = figures[static_cast<size_t>(i)];
+            for (py::ssize_t ti = 0; ti < t; ++ti) {
+                const auto& tri = fig.triangles[static_cast<size_t>(ti)];
+                buf(i, ti, 0, 0) = tri.v0.x;
+                buf(i, ti, 0, 1) = tri.v0.y;
+                buf(i, ti, 1, 0) = tri.v1.x;
+                buf(i, ti, 1, 1) = tri.v1.y;
+                buf(i, ti, 2, 0) = tri.v2.x;
+                buf(i, ti, 2, 1) = tri.v2.y;
+            }
+        }
+        return arr;
+    });
+
     // Solution
     py::class_<tree_packing::Solution>(m, "Solution")
         .def(py::init<>())
@@ -124,7 +148,53 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("get_params", &tree_packing::Solution::get_params)
         .def("set_params", &tree_packing::Solution::set_params)
         .def("set_nan", &tree_packing::Solution::set_nan)
-        .def("recompute_cache", &tree_packing::Solution::recompute_cache);
+        .def("recompute_cache", &tree_packing::Solution::recompute_cache)
+        .def("centers", [](const tree_packing::Solution& self) {
+            py::ssize_t n = static_cast<py::ssize_t>(self.centers().size());
+            py::array_t<float> arr({n, static_cast<py::ssize_t>(2)});
+            auto buf = arr.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                const auto& c = self.centers()[static_cast<size_t>(i)];
+                buf(i, 0) = c.x;
+                buf(i, 1) = c.y;
+            }
+            return arr;
+        })
+        .def("aabbs", [](const tree_packing::Solution& self) {
+            py::ssize_t n = static_cast<py::ssize_t>(self.aabbs().size());
+            py::array_t<float> arr({n, static_cast<py::ssize_t>(4)});
+            auto buf = arr.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                const auto& aabb = self.aabbs()[static_cast<size_t>(i)];
+                buf(i, 0) = aabb.min.x;
+                buf(i, 1) = aabb.min.y;
+                buf(i, 2) = aabb.max.x;
+                buf(i, 3) = aabb.max.y;
+            }
+            return arr;
+        })
+        .def("max_abs", [](const tree_packing::Solution& self) {
+            return make_array_view(self.max_abs(), py::cast(&self));
+        })
+        .def("figures", [](const tree_packing::Solution& self) {
+            py::ssize_t n = static_cast<py::ssize_t>(self.figures().size());
+            py::ssize_t t = static_cast<py::ssize_t>(tree_packing::TREE_NUM_TRIANGLES);
+            py::array_t<float> arr({n, t, static_cast<py::ssize_t>(3), static_cast<py::ssize_t>(2)});
+            auto buf = arr.mutable_unchecked<4>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                const auto& fig = self.figures()[static_cast<size_t>(i)];
+                for (py::ssize_t ti = 0; ti < t; ++ti) {
+                    const auto& tri = fig.triangles[static_cast<size_t>(ti)];
+                    buf(i, ti, 0, 0) = tri.v0.x;
+                    buf(i, ti, 0, 1) = tri.v0.y;
+                    buf(i, ti, 1, 0) = tri.v1.x;
+                    buf(i, ti, 1, 1) = tri.v1.y;
+                    buf(i, ti, 2, 0) = tri.v2.x;
+                    buf(i, ti, 2, 1) = tri.v2.y;
+                }
+            }
+            return arr;
+        });
 
     // SolutionEval
     py::class_<tree_packing::SolutionEval>(m, "SolutionEval")
@@ -133,6 +203,43 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def_readwrite("objective", &tree_packing::SolutionEval::objective)
         .def_readwrite("intersection_violation", &tree_packing::SolutionEval::intersection_violation)
         .def_readwrite("bounds_violation", &tree_packing::SolutionEval::bounds_violation)
+        .def("intersection_map", [](const tree_packing::SolutionEval& self) {
+            py::list out;
+            for (const auto& row_ptr : self.intersection_map) {
+                if (!row_ptr) {
+                    out.append(py::none());
+                    continue;
+                }
+                py::list row;
+                for (const auto& [idx, score] : *row_ptr) {
+                    row.append(py::make_tuple(idx, score));
+                }
+                out.append(row);
+            }
+            return out;
+        })
+        .def("intersection_matrix", [](const tree_packing::SolutionEval& self) {
+            size_t n = self.intersection_map.size();
+            py::array_t<float> mat({static_cast<py::ssize_t>(n),
+                                    static_cast<py::ssize_t>(n)});
+            auto buf = mat.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < static_cast<py::ssize_t>(n); ++i) {
+                for (py::ssize_t j = 0; j < static_cast<py::ssize_t>(n); ++j) {
+                    buf(i, j) = 0.0f;
+                }
+            }
+            for (size_t i = 0; i < n; ++i) {
+                const auto& row_ptr = self.intersection_map[i];
+                if (!row_ptr) continue;
+                for (const auto& [idx, score] : *row_ptr) {
+                    if (idx < 0) continue;
+                    size_t j = static_cast<size_t>(idx);
+                    if (j >= n) continue;
+                    buf(static_cast<py::ssize_t>(i), static_cast<py::ssize_t>(j)) = score;
+                }
+            }
+            return mat;
+        })
         .def("copy_from", &tree_packing::SolutionEval::copy_from)
         .def("total_violation", &tree_packing::SolutionEval::total_violation)
         .def("n_missing", &tree_packing::SolutionEval::n_missing)
@@ -161,6 +268,20 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("iters_since_feasible_improvement", &tree_packing::GlobalState::iters_since_feasible_improvement)
         .def("best_score", &tree_packing::GlobalState::best_score)
         .def("best_feasible_score", &tree_packing::GlobalState::best_feasible_score)
+        .def("best_solution", [](const tree_packing::GlobalState& self) -> py::object {
+            const auto* best = self.best_solution();
+            if (!best) {
+                return py::none();
+            }
+            return py::cast(*best);
+        })
+        .def("best_feasible_solution", [](const tree_packing::GlobalState& self) -> py::object {
+            const auto* best = self.best_feasible_solution();
+            if (!best) {
+                return py::none();
+            }
+            return py::cast(*best);
+        })
         .def("mu", &tree_packing::GlobalState::mu)
         .def("set_mu", &tree_packing::GlobalState::set_mu)
         .def("tolerance", &tree_packing::GlobalState::tolerance)
@@ -195,8 +316,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             tree_packing::RNG& rng
         ) {
-            tree_packing::SolutionEval out;
-            self.apply(solution, state.value, global_state, rng, out);
+            tree_packing::SolutionEval out = solution;
+            self.apply(out, state.value, global_state, rng);
             return py::make_tuple(out, OptimizerState{state.value});
         })
         .def("step", [](
@@ -205,8 +326,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             OptimizerState& state,
             tree_packing::GlobalState& global_state
         ) {
-            tree_packing::SolutionEval out;
-            self.step(solution, state.value, global_state, out);
+            tree_packing::SolutionEval out = solution;
+            self.step(out, state.value, global_state);
             return py::make_tuple(out, OptimizerState{state.value}, global_state);
         })
         .def("run", [](
@@ -216,8 +337,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             int n
         ) {
-            tree_packing::SolutionEval out;
-            self.run(solution, state.value, global_state, n, out);
+            tree_packing::SolutionEval out = solution;
+            self.run(out, state.value, global_state, n);
             return py::make_tuple(out, OptimizerState{state.value}, global_state);
         })
         .def("apply_inplace", [](
@@ -227,9 +348,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             tree_packing::RNG& rng
         ) {
-            tree_packing::SolutionEval out;
-            self.apply(solution, state.value, global_state, rng, out);
-            solution.copy_from(out);
+            self.apply(solution, state.value, global_state, rng);
         })
         .def("step_inplace", [](
             tree_packing::Optimizer& self,
@@ -237,9 +356,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             OptimizerState& state,
             tree_packing::GlobalState& global_state
         ) {
-            tree_packing::SolutionEval out;
-            self.step(solution, state.value, global_state, out);
-            solution.copy_from(out);
+            self.step(solution, state.value, global_state);
         })
         .def("run_inplace", [](
             tree_packing::Optimizer& self,
@@ -248,9 +365,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             int n
         ) {
-            tree_packing::SolutionEval out;
-            self.run(solution, state.value, global_state, n, out);
-            solution.copy_from(out);
+            self.run(solution, state.value, global_state, n);
         });
 
     // RandomRuin
@@ -413,9 +528,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         // Run optimization
         for (int i = 0; i < num_iterations; ++i) {
             tree_packing::RNG rng(global_state.split_rng());
-            tree_packing::SolutionEval new_solution;
-            sa.apply(solution_eval, state, global_state, rng, new_solution);
-            solution_eval.copy_from(new_solution);
+            sa.apply(solution_eval, state, global_state, rng);
 
             global_state.maybe_update_best(problem, solution_eval);
             global_state.next();

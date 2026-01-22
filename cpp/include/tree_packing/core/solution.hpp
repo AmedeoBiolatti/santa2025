@@ -43,6 +43,7 @@ public:
     [[nodiscard]] const std::vector<Vec2>& centers() const { return centers_; }
     [[nodiscard]] const std::vector<AABB>& aabbs() const { return aabbs_; }
     [[nodiscard]] const std::vector<float>& max_abs() const { return max_abs_; }
+    [[nodiscard]] const std::vector<std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>>& normals() const { return normals_; }
     [[nodiscard]] float max_abs(size_t i) const { return max_abs_[i]; }
     [[nodiscard]] float max_max_abs() const { return max_max_abs_; }
     [[nodiscard]] size_t max_max_abs_idx() const { return max_max_abs_idx_; }
@@ -83,6 +84,7 @@ protected:
     std::vector<Vec2> centers_;
     std::vector<AABB> aabbs_;
     std::vector<float> max_abs_;
+    std::vector<std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>> normals_;
     float max_max_abs_{0.0f};
     size_t max_max_abs_idx_{static_cast<size_t>(-1)};
     std::vector<char> valid_;
@@ -101,6 +103,7 @@ struct SolutionEval {
     // Constraint evaluations
     float intersection_violation{0.0f};
     float bounds_violation{0.0f};
+    int intersection_count{0};
 
     // Intersection map (cached for incremental updates)
     using IntersectionList = std::vector<std::pair<Index, float>>;
@@ -127,6 +130,7 @@ struct SolutionEval {
         objective = other.objective;
         intersection_violation = other.intersection_violation;
         bounds_violation = other.bounds_violation;
+        intersection_count = other.intersection_count;
         valid_count = other.valid_count;
         min_x = other.min_x;
         max_x = other.max_x;
