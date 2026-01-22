@@ -45,6 +45,12 @@ public:
         const TreeParamsSoA& new_params
     ) const;
 
+    // Mark solution params as NaN in-place and evaluate full objective/constraints.
+    void remove_and_eval(
+        SolutionEval& eval,
+        const std::vector<int>& indices
+    ) const;
+
     // Compute score (objective + penalty * violations + missing penalty)
     [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const;
 

@@ -93,13 +93,17 @@ endif()
 
 # Tests
 if(BUILD_TESTS)
-    include(FetchContent)
-    FetchContent_Declare(
-        Catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG        v3.4.0
-    )
-    FetchContent_MakeAvailable(Catch2)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Catch2/CMakeLists.txt)
+        add_subdirectory(third_party/Catch2)
+    else()
+        include(FetchContent)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG        v3.4.0
+        )
+        FetchContent_MakeAvailable(Catch2)
+    endif()
 
     add_executable(test_tree_packing
         tests/test_types.cpp
@@ -108,6 +112,7 @@ if(BUILD_TESTS)
         tests/test_grid2d.cpp
         tests/test_solution.cpp
         tests/test_optimizers.cpp
+        tests/test_incremental.cpp
     )
     target_link_libraries(test_tree_packing PRIVATE tree_packing Catch2::Catch2WithMain)
 

@@ -374,6 +374,79 @@ void Problem::update_and_eval(
     );
 }
 
+void Problem::remove_and_eval(
+    SolutionEval& eval,
+    const std::vector<int>& indices
+) const {
+    bool recompute_max_abs = false;
+
+    for (int idx : indices) {
+        size_t i = static_cast<size_t>(idx);
+        bool was_valid = eval.solution.valid_[i];
+        if (was_valid) {
+            eval.solution.valid_[i] = false;
+            eval.solution.missing_count_ += 1;
+            eval.valid_count -= 1;
+        }
+
+        eval.solution.params_.set_nan(i);
+
+        for (auto& tri : eval.solution.figures_[i].triangles) {
+            tri.v0 = Vec2::nan();
+            tri.v1 = Vec2::nan();
+            tri.v2 = Vec2::nan();
+        }
+        eval.solution.centers_[i] = Vec2::nan();
+        eval.solution.aabbs_[i] = AABB{};
+        eval.solution.max_abs_[i] = 0.0f;
+        eval.solution.grid_.update(static_cast<int>(i), Vec2::nan());
+
+        if (eval.solution.max_max_abs_idx_ == i) {
+            recompute_max_abs = true;
+        }
+    }
+
+    if (recompute_max_abs) {
+        float max_abs = 0.0f;
+        int idx = 0;
+        for (int i = 0; i < eval.solution.max_abs_.size(); ++i) {
+            float v = eval.solution.max_abs_[i];
+            if (v > max_abs) {
+                max_abs = v;
+                idx = i;
+            }
+        }
+        eval.solution.max_max_abs_ = max_abs;
+        eval.solution.max_max_abs_idx_ = static_cast<size_t>(idx);
+    }
+
+    auto obj_bounds = compute_bounds_full(eval.solution);
+    eval.min_x = obj_bounds.min_x;
+    eval.max_x = obj_bounds.max_x;
+    eval.min_y = obj_bounds.min_y;
+    eval.max_y = obj_bounds.max_y;
+    eval.min_x_idx = obj_bounds.min_x_idx;
+    eval.max_x_idx = obj_bounds.max_x_idx;
+    eval.min_y_idx = obj_bounds.min_y_idx;
+    eval.max_y_idx = obj_bounds.max_y_idx;
+
+    float delta_x = obj_bounds.max_x - obj_bounds.min_x;
+    float delta_y = obj_bounds.max_y - obj_bounds.min_y;
+    float length = std::max(delta_x, delta_y);
+    eval.objective = (length * length) / static_cast<float>(eval.solution.size());
+
+    BoundsConstraint bounds(min_pos_, max_pos_);
+    eval.bounds_violation = bounds.eval(eval.solution);
+
+    IntersectionConstraint intersection;
+    eval.intersection_violation = intersection.eval_update(
+        eval.solution,
+        eval.intersection_map,
+        indices,
+        eval.intersection_violation
+    );
+}
+
 float Problem::score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
     uint64_t revision = solution_eval.solution.revision();
     float mu = global_state.mu();
