@@ -307,6 +307,7 @@ void Problem::update_and_eval(
         if (!eval.solution.valid_[i]) {
             eval.solution.valid_[i] = true;
             eval.solution.missing_count_ -= 1;
+            eval.valid_count += 1;
         }
         // figure
         eval.solution.figures_[i] = params_to_figure(p);
