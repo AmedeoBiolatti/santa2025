@@ -199,8 +199,12 @@ TEST_CASE("Incremental eval matches full eval", "[incremental]") {
     p11.angle -= 0.2f;
     updated.set_params(11, p11);
 
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+    TreeParamsSoA new_params(indices.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        new_params.set(i, updated.get_params(static_cast<size_t>(indices[i])));
+    }
+    problem.update_and_eval(inc, indices, new_params);
     require_eval_matches_full(problem, updated, inc);
 }
 
@@ -270,8 +274,12 @@ TEST_CASE("Incremental eval handles validity transitions", "[incremental]") {
     updated.set_params(7, p7);
     updated.set_params(12, TreeParams(-2.0f, 1.5f, -0.2f));
 
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+    TreeParamsSoA new_params(indices.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        new_params.set(i, updated.get_params(static_cast<size_t>(indices[i])));
+    }
+    problem.update_and_eval(inc, indices, new_params);
     require_eval_matches_full(problem, updated, inc);
 }
 
@@ -344,8 +352,10 @@ TEST_CASE("Incremental eval handles bounds invalidation", "[incremental]") {
     updated.set_params(static_cast<size_t>(idx), p);
 
     std::vector<int> indices = {idx};
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+    TreeParamsSoA new_params(indices.size());
+    new_params.set(0, p);
+    problem.update_and_eval(inc, indices, new_params);
     require_eval_matches_full(problem, updated, inc);
 }
 
@@ -386,8 +396,12 @@ TEST_CASE("Incremental eval keeps intersection map consistent", "[incremental]")
     updated.set_params(4, TreeParams(-1.1f, -0.3f, -0.4f));
     updated.set_params(9, TreeParams(0.4f, -1.5f, 0.9f));
 
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+    TreeParamsSoA new_params(indices.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        new_params.set(i, updated.get_params(static_cast<size_t>(indices[i])));
+    }
+    problem.update_and_eval(inc, indices, new_params);
 
     IntersectionConstraint constraint;
     SolutionEval::IntersectionMap map;

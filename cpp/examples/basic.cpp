@@ -32,7 +32,7 @@ int main() {
     std::vector<OptimizerPtr> recreate_ops;
 
     ruin_ops.push_back(std::make_unique<RandomRuin>(1));
-    ruin_ops.push_back(std::make_unique<SpatialRuin>(2));
+    ruin_ops.push_back(std::make_unique<CellRuin>(2));
     recreate_ops.push_back(std::make_unique<RandomRecreate>(1));
     recreate_ops.push_back(std::make_unique<RandomRecreate>(2));
 

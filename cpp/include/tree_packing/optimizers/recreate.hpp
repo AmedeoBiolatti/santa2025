@@ -35,7 +35,7 @@ private:
     bool verbose_;
 
     // Find indices of removed (NaN) trees
-    void get_removed_indices(const TreeParamsSoA& params, std::vector<int>& out);
+    void get_removed_indices(const Solution& solution, std::vector<int>& out);
 };
 
 // State for RandomRecreate

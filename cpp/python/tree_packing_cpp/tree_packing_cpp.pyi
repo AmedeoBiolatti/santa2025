@@ -4,7 +4,7 @@ C++ implementation of tree packing optimization
 from __future__ import annotations
 import numpy
 import typing
-__all__: list[str] = ['ALNS', 'CENTER_R', 'CENTER_Y', 'Chain', 'CoolingSchedule', 'GlobalState', 'NoiseOptimizer', 'Optimizer', 'OptimizerState', 'PI', 'Problem', 'RNG', 'RandomRecreate', 'RandomRuin', 'SimulatedAnnealing', 'Solution', 'SolutionEval', 'SpatialRuin', 'THR', 'TreeParams', 'TreeParamsSoA', 'Vec2', 'run_optimization']
+__all__: list[str] = ['ALNS', 'CENTER_R', 'CENTER_Y', 'CellRuin', 'Chain', 'CoolingSchedule', 'GlobalState', 'NoiseOptimizer', 'Optimizer', 'OptimizerState', 'PI', 'Problem', 'RNG', 'RandomRecreate', 'RandomRuin', 'SimulatedAnnealing', 'Solution', 'SolutionEval', 'THR', 'TreeParams', 'TreeParamsSoA', 'Vec2', 'run_optimization']
 def params_to_figures(params: TreeParamsSoA) -> numpy.ndarray[numpy.float32]:
     ...
 class ALNS(Optimizer):
@@ -221,7 +221,7 @@ class SolutionEval:
         ...
     def total_violation(self) -> float:
         ...
-class SpatialRuin(Optimizer):
+class CellRuin(Optimizer):
     def __init__(self, n_remove: int = 1, verbose: bool = False) -> None:
         ...
 class TreeParams:

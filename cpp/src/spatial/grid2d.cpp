@@ -16,6 +16,26 @@ Grid2D Grid2D::empty(size_t num_items, int n, float size, int capacity, float ce
     grid.ij2k_.resize(grid.N_ * grid.N_ * capacity, -1);
     grid.ij2n_.resize(grid.N_ * grid.N_, 0);
     grid.k2ij_.resize(num_items * 2, 0);
+    grid.cell_bounds_.resize(grid.N_ * grid.N_);
+    grid.cell_bounds_expanded_.resize(grid.N_ * grid.N_);
+    for (int i = 0; i < grid.N_; ++i) {
+        for (int j = 0; j < grid.N_; ++j) {
+            int n_half = grid.n_ / 2;
+            int gi = i - 1 - n_half;
+            int gj = j - 1 - n_half;
+            float min_x = grid.center_ + static_cast<float>(gi) * grid.size_;
+            float min_y = grid.center_ + static_cast<float>(gj) * grid.size_;
+            Vec2 min{min_x, min_y};
+            Vec2 max{min_x + grid.size_, min_y + grid.size_};
+            AABB bounds{min, max};
+            grid.cell_bounds_[i * grid.N_ + j] = bounds;
+            bounds.min.x -= CENTER_R;
+            bounds.min.y -= CENTER_R;
+            bounds.max.x += CENTER_R;
+            bounds.max.y += CENTER_R;
+            grid.cell_bounds_expanded_[i * grid.N_ + j] = bounds;
+        }
+    }
 
     return grid;
 }
@@ -53,6 +73,24 @@ std::pair<int, int> Grid2D::compute_ij(const Vec2& pos) const {
 
     // Add 1 for padding
     return {i + 1, j + 1};
+}
+
+std::pair<int, int> Grid2D::get_item_cell(int k) const {
+    return {k2ij_[k * 2 + 0], k2ij_[k * 2 + 1]};
+}
+
+AABB Grid2D::cell_bounds(int i, int j) const {
+    if (i < 0 || i >= N_ || j < 0 || j >= N_) {
+        return AABB{};
+    }
+    return cell_bounds_[i * N_ + j];
+}
+
+AABB Grid2D::cell_bounds_expanded(int i, int j) const {
+    if (i < 0 || i >= N_ || j < 0 || j >= N_) {
+        return AABB{};
+    }
+    return cell_bounds_expanded_[i * N_ + j];
 }
 
 void Grid2D::add_item_to_cell(int k, int i, int j) {
@@ -146,6 +184,34 @@ void Grid2D::get_candidates_by_cell(int i, int j, std::vector<Index>& out) const
             out[out_idx++] = static_cast<Index>(item);
         }
     }
+}
+
+std::vector<Index> Grid2D::get_items_in_cell(int i, int j) const {
+    std::vector<Index> items;
+    get_items_in_cell(i, j, items);
+    return items;
+}
+
+void Grid2D::get_items_in_cell(int i, int j, std::vector<Index>& out) const {
+    size_t needed = static_cast<size_t>(capacity_);
+    if (out.size() != needed) {
+        out.resize(needed);
+    }
+    std::fill(out.begin(), out.end(), static_cast<Index>(-1));
+    if (i < 0 || i >= N_ || j < 0 || j >= N_) {
+        return;
+    }
+    int base = cell_index(i, j);
+    for (int s = 0; s < capacity_; ++s) {
+        out[static_cast<size_t>(s)] = static_cast<Index>(ij2k_[base + s]);
+    }
+}
+
+int Grid2D::cell_count(int i, int j) const {
+    if (i < 0 || i >= N_ || j < 0 || j >= N_) {
+        return 0;
+    }
+    return ij2n_[count_index(i, j)];
 }
 
 }  // namespace tree_packing

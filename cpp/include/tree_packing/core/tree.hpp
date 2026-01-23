@@ -33,6 +33,22 @@ constexpr std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES> TREE_NORMALS = {{
      Vec2{-0.8f, 0.6f}}
 }};
 
+// Triangles centers and radius
+constexpr std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES> TRIANGLE_CENTERS = {
+  Vec2{ 0.0f,  0.62395835f },   // t1
+  Vec2{ 0.0f,  0.37681818f },   // t2
+  Vec2{ 0.0f,  0.0f        },   // t3
+  Vec2{ 0.0f, -0.10000000f },   // t4
+  Vec2{ 0.0f, -0.10000000f },   // t5
+};
+constexpr std::array<float, TREE_NUM_TRIANGLES> TRIANGLE_RADII = {
+  0.17604166f,  // t1
+  0.23681818f,  // t2
+  0.34999999f,  // t3  (float32 representation of 0.35)
+  0.12500000f,  // t4
+  0.12500000f,  // t5
+};
+
 // Disjoint tree shape (for area computation)
 constexpr size_t TREE_DISJOINT_NUM_TRIANGLES = 7;
 constexpr std::array<Triangle, TREE_DISJOINT_NUM_TRIANGLES> TREE_DISJOINT_SHAPE = {{

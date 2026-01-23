@@ -5,7 +5,7 @@
 using namespace tree_packing;
 
 int main(int argc, char** argv) {
-    int num_iterations = 2000000;
+    int num_iterations = 20000000;
     if (argc > 1) {
         try {
             num_iterations = std::stoi(argv[1]);
@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
     Problem problem = Problem::create_tree_packing_problem();
 
     const int num_trees = 199;
-    const float side = 10.0f;
+    const float side = 1.0f;
     const uint64_t seed = 42;
 
     Solution initial = Solution::init_random(num_trees, side, seed);
@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     std::vector<OptimizerPtr> recreate_ops;
 
     ruin_ops.push_back(std::make_unique<RandomRuin>(1));
-    ruin_ops.push_back(std::make_unique<SpatialRuin>(2));
+    ruin_ops.push_back(std::make_unique<CellRuin>(2));
     recreate_ops.push_back(std::make_unique<RandomRecreate>(1));
     recreate_ops.push_back(std::make_unique<RandomRecreate>(2));
 

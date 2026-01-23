@@ -70,8 +70,10 @@ ObjectiveBounds compute_bounds_full(const Solution& solution) {
         b.valid_count = static_cast<int16_t>(b.valid_count + 1);
         update_bounds_with_aabb(b, aabbs[i], static_cast<int>(i));
     }
+
     return b;
 }
+
 }  // namespace
 
 Problem Problem::create_tree_packing_problem(float side) {
@@ -172,125 +174,6 @@ void Problem::eval_inplace(const Solution& solution, SolutionEval& eval) const {
     eval.bounds_violation = bounds.eval(solution);
 }
 
-SolutionEval Problem::eval_update(
-    const Solution& solution,
-    const SolutionEval& prev_eval,
-    const std::vector<int>& modified_indices
-) const {
-    SolutionEval eval;
-    eval_update_inplace(solution, prev_eval, modified_indices, eval);
-    return eval;
-}
-
-void Problem::eval_update_inplace(
-    const Solution& solution,
-    const SolutionEval& prev_eval,
-    const std::vector<int>& modified_indices,
-    SolutionEval& eval
-) const {
-    if (&eval.solution != &solution) {
-        eval.solution.copy_from(solution);
-    }
-
-    bool recompute_bounds = false;
-    ObjectiveBounds obj_bounds;
-    obj_bounds.valid_count = prev_eval.valid_count;
-    obj_bounds.min_x = prev_eval.min_x;
-    obj_bounds.max_x = prev_eval.max_x;
-    obj_bounds.min_y = prev_eval.min_y;
-    obj_bounds.max_y = prev_eval.max_y;
-    obj_bounds.min_x_idx = prev_eval.min_x_idx;
-    obj_bounds.max_x_idx = prev_eval.max_x_idx;
-    obj_bounds.min_y_idx = prev_eval.min_y_idx;
-    obj_bounds.max_y_idx = prev_eval.max_y_idx;
-
-    if (prev_eval.valid_count == 0) {
-        obj_bounds.min_x = std::numeric_limits<float>::max();
-        obj_bounds.max_x = std::numeric_limits<float>::lowest();
-        obj_bounds.min_y = std::numeric_limits<float>::max();
-        obj_bounds.max_y = std::numeric_limits<float>::lowest();
-        obj_bounds.min_x_idx = -1;
-        obj_bounds.max_x_idx = -1;
-        obj_bounds.min_y_idx = -1;
-        obj_bounds.max_y_idx = -1;
-    }
-
-    const auto& aabbs = solution.aabbs();
-
-    for (int idx : modified_indices) {
-        if (idx < 0 || static_cast<size_t>(idx) >= aabbs.size()) continue;
-
-        bool prev_valid = prev_eval.solution.is_valid(static_cast<size_t>(idx));
-        bool new_valid = solution.is_valid(static_cast<size_t>(idx));
-
-        if (prev_valid &&
-            (idx == obj_bounds.min_x_idx || idx == obj_bounds.max_x_idx ||
-             idx == obj_bounds.min_y_idx || idx == obj_bounds.max_y_idx)) {
-            recompute_bounds = true;
-            break;
-        }
-
-        if (prev_valid && !new_valid) {
-            int new_count = std::max(0, static_cast<int>(obj_bounds.valid_count) - 1);
-            obj_bounds.valid_count = static_cast<int16_t>(new_count);
-            continue;
-        }
-
-        if (!new_valid) continue;
-
-        if (!prev_valid) {
-            obj_bounds.valid_count = static_cast<int16_t>(obj_bounds.valid_count + 1);
-        }
-
-        update_bounds_with_aabb(obj_bounds, aabbs[idx], idx);
-    }
-
-    if (recompute_bounds) {
-        obj_bounds = compute_bounds_full(solution);
-    }
-
-    eval.valid_count = obj_bounds.valid_count;
-    eval.min_x = obj_bounds.min_x;
-    eval.max_x = obj_bounds.max_x;
-    eval.min_y = obj_bounds.min_y;
-    eval.max_y = obj_bounds.max_y;
-    eval.min_x_idx = obj_bounds.min_x_idx;
-    eval.max_x_idx = obj_bounds.max_x_idx;
-    eval.min_y_idx = obj_bounds.min_y_idx;
-    eval.max_y_idx = obj_bounds.max_y_idx;
-
-    if (obj_bounds.valid_count == 0) {
-        eval.objective = 0.0f;
-    } else {
-        float delta_x = obj_bounds.max_x - obj_bounds.min_x;
-        float delta_y = obj_bounds.max_y - obj_bounds.min_y;
-        float length = std::max(delta_x, delta_y);
-        eval.objective = (length * length) / static_cast<float>(solution.size());
-    }
-
-    // Copy previous map without reallocating and update incrementally
-    const auto& prev_map = prev_eval.intersection_map;
-    auto& out_map = eval.intersection_map;
-    if (out_map.size() != prev_map.size()) {
-        out_map.resize(prev_map.size());
-    }
-    std::copy(prev_map.begin(), prev_map.end(), out_map.begin());
-
-    IntersectionConstraint intersection;
-    eval.intersection_violation = intersection.eval_update(
-        solution,
-        out_map,
-        modified_indices,
-        prev_eval.intersection_violation,
-        prev_eval.intersection_count,
-        &eval.intersection_count
-    );
-
-    // Bounds constraint doesn't need incremental update (it's fast)
-    BoundsConstraint bounds(min_pos_, max_pos_);
-    eval.bounds_violation = bounds.eval(solution);
-}
-
 void Problem::update_and_eval(
     SolutionEval& eval,
     const std::vector<int>& indices,
@@ -302,6 +185,10 @@ void Problem::update_and_eval(
     }
 
     bool recompute_max_abs = false;
+    bool recompute_min_x = false;
+    bool recompute_max_x = false;
+    bool recompute_min_y = false;
+    bool recompute_max_y = false;
 
     for (size_t k=0; k<indices.size(); k++){
         auto i = indices[k];
@@ -315,6 +202,30 @@ void Problem::update_and_eval(
         bool new_valid = eval.solution.valid_[i];
         if (old_valid != new_valid) {
             eval.valid_count += new_valid ? 1 : -1;
+        }
+        if (eval.min_x_idx == i) {
+            recompute_min_x = true;
+        } else if (new_valid && eval.solution.aabbs_[i].min.x < eval.min_x) {
+            eval.min_x = eval.solution.aabbs_[i].min.x;
+            eval.min_x_idx = static_cast<Index>(i);
+        }
+        if (eval.max_x_idx == i) {
+            recompute_max_x = true;
+        } else if (new_valid && eval.solution.aabbs_[i].max.x > eval.max_x) {
+            eval.max_x = eval.solution.aabbs_[i].max.x;
+            eval.max_x_idx = static_cast<Index>(i);
+        }
+        if (eval.min_y_idx == i) {
+            recompute_min_y = true;
+        } else if (new_valid && eval.solution.aabbs_[i].min.y < eval.min_y) {
+            eval.min_y = eval.solution.aabbs_[i].min.y;
+            eval.min_y_idx = static_cast<Index>(i);
+        }
+        if (eval.max_y_idx == i) {
+            recompute_max_y = true;
+        } else if (new_valid && eval.solution.aabbs_[i].max.y > eval.max_y) {
+            eval.max_y = eval.solution.aabbs_[i].max.y;
+            eval.max_y_idx = static_cast<Index>(i);
         }
         if (eval.solution.max_max_abs_idx_ == static_cast<size_t>(i)) {
             recompute_max_abs = true;
@@ -333,24 +244,51 @@ void Problem::update_and_eval(
         eval.solution.max_max_abs_ = max_abs;
         eval.solution.max_max_abs_idx_ = idx;
     }
-    // objective : todo improve
-    auto obj_bounds = compute_bounds_full(eval.solution);
-    eval.min_x = obj_bounds.min_x;
-    eval.max_x = obj_bounds.max_x;
-    eval.min_y = obj_bounds.min_y;
-    eval.max_y = obj_bounds.max_y;
-    eval.min_x_idx = obj_bounds.min_x_idx;
-    eval.max_x_idx = obj_bounds.max_x_idx;
-    eval.min_y_idx = obj_bounds.min_y_idx;
-    eval.max_y_idx = obj_bounds.max_y_idx;
-
-    float delta_x = obj_bounds.max_x - obj_bounds.min_x;
-    float delta_y = obj_bounds.max_y - obj_bounds.min_y;
+    if (recompute_min_x || recompute_max_x || recompute_min_y || recompute_max_y) {
+        const auto& aabbs = eval.solution.aabbs();
+        if (recompute_min_x) {
+            eval.min_x = std::numeric_limits<float>::max();
+            eval.min_x_idx = -1;
+        }
+        if (recompute_max_x) {
+            eval.max_x = std::numeric_limits<float>::lowest();
+            eval.max_x_idx = -1;
+        }
+        if (recompute_min_y) {
+            eval.min_y = std::numeric_limits<float>::max();
+            eval.min_y_idx = -1;
+        }
+        if (recompute_max_y) {
+            eval.max_y = std::numeric_limits<float>::lowest();
+            eval.max_y_idx = -1;
+        }
+        for (size_t i = 0; i < aabbs.size(); ++i) {
+            if (!eval.solution.valid_[i]) continue;
+            if (recompute_min_x && aabbs[i].min.x < eval.min_x) {
+                eval.min_x = aabbs[i].min.x;
+                eval.min_x_idx = static_cast<Index>(i);
+            }
+            if (recompute_max_x && aabbs[i].max.x > eval.max_x) {
+                eval.max_x = aabbs[i].max.x;
+                eval.max_x_idx = static_cast<Index>(i);
+            }
+            if (recompute_min_y && aabbs[i].min.y < eval.min_y) {
+                eval.min_y = aabbs[i].min.y;
+                eval.min_y_idx = static_cast<Index>(i);
+            }
+            if (recompute_max_y && aabbs[i].max.y > eval.max_y) {
+                eval.max_y = aabbs[i].max.y;
+                eval.max_y_idx = static_cast<Index>(i);
+            }
+        }
+    }
+    float delta_x = eval.max_x - eval.min_x;
+    float delta_y = eval.max_y - eval.min_y;
     float length = std::max(delta_x, delta_y);
     eval.objective = (length * length) / static_cast<float>(eval.solution.size());
     // bounds constraint
     BoundsConstraint bounds(min_pos_, max_pos_);
-    eval.bounds_violation = bounds.eval(eval.solution);
+    eval.bounds_violation = bounds.eval_update(eval.min_x, eval.max_x, eval.min_y, eval.max_y);
     // const constraint
     IntersectionConstraint intersection;
     eval.intersection_violation = intersection.eval_update(
@@ -369,6 +307,10 @@ void Problem::remove_and_eval(
     const std::vector<int>& indices
 ) const {
     bool recompute_max_abs = false;
+    bool recompute_min_x = false;
+    bool recompute_max_x = false;
+    bool recompute_min_y = false;
+    bool recompute_max_y = false;
 
     for (int idx : indices) {
         size_t i = static_cast<size_t>(idx);
@@ -376,6 +318,18 @@ void Problem::remove_and_eval(
         eval.solution.set_nan(i);
         if (was_valid) {
             eval.valid_count -= 1;
+        }
+        if (eval.min_x_idx == idx) {
+            recompute_min_x = true;
+        }
+        if (eval.max_x_idx == idx) {
+            recompute_max_x = true;
+        }
+        if (eval.min_y_idx == idx) {
+            recompute_min_y = true;
+        }
+        if (eval.max_y_idx == idx) {
+            recompute_max_y = true;
         }
         if (eval.solution.max_max_abs_idx_ == i) {
             recompute_max_abs = true;
@@ -396,26 +350,58 @@ void Problem::remove_and_eval(
         eval.solution.max_max_abs_idx_ = idx;
     }
 
-    auto obj_bounds = compute_bounds_full(eval.solution);
-    eval.min_x = obj_bounds.min_x;
-    eval.max_x = obj_bounds.max_x;
-    eval.min_y = obj_bounds.min_y;
-    eval.max_y = obj_bounds.max_y;
-    eval.min_x_idx = obj_bounds.min_x_idx;
-    eval.max_x_idx = obj_bounds.max_x_idx;
-    eval.min_y_idx = obj_bounds.min_y_idx;
-    eval.max_y_idx = obj_bounds.max_y_idx;
-
-    float delta_x = obj_bounds.max_x - obj_bounds.min_x;
-    float delta_y = obj_bounds.max_y - obj_bounds.min_y;
-    float length = std::max(delta_x, delta_y);
-    eval.objective = (length * length) / static_cast<float>(eval.solution.size());
+    if (recompute_min_x || recompute_max_x || recompute_min_y || recompute_max_y) {
+        const auto& aabbs = eval.solution.aabbs();
+        if (recompute_min_x) {
+            eval.min_x = std::numeric_limits<float>::max();
+            eval.min_x_idx = -1;
+        }
+        if (recompute_max_x) {
+            eval.max_x = std::numeric_limits<float>::lowest();
+            eval.max_x_idx = -1;
+        }
+        if (recompute_min_y) {
+            eval.min_y = std::numeric_limits<float>::max();
+            eval.min_y_idx = -1;
+        }
+        if (recompute_max_y) {
+            eval.max_y = std::numeric_limits<float>::lowest();
+            eval.max_y_idx = -1;
+        }
+        for (size_t i = 0; i < aabbs.size(); ++i) {
+            if (!eval.solution.valid_[i]) continue;
+            if (recompute_min_x && aabbs[i].min.x < eval.min_x) {
+                eval.min_x = aabbs[i].min.x;
+                eval.min_x_idx = static_cast<Index>(i);
+            }
+            if (recompute_max_x && aabbs[i].max.x > eval.max_x) {
+                eval.max_x = aabbs[i].max.x;
+                eval.max_x_idx = static_cast<Index>(i);
+            }
+            if (recompute_min_y && aabbs[i].min.y < eval.min_y) {
+                eval.min_y = aabbs[i].min.y;
+                eval.min_y_idx = static_cast<Index>(i);
+            }
+            if (recompute_max_y && aabbs[i].max.y > eval.max_y) {
+                eval.max_y = aabbs[i].max.y;
+                eval.max_y_idx = static_cast<Index>(i);
+            }
+        }
+    }
+    if (eval.valid_count == 0) {
+        eval.objective = 0.0f;
+    } else {
+        float delta_x = eval.max_x - eval.min_x;
+        float delta_y = eval.max_y - eval.min_y;
+        float length = std::max(delta_x, delta_y);
+        eval.objective = (length * length) / static_cast<float>(eval.solution.size());
+    }
 
     BoundsConstraint bounds(min_pos_, max_pos_);
-    eval.bounds_violation = bounds.eval(eval.solution);
+    eval.bounds_violation = bounds.eval_update(eval.min_x, eval.max_x, eval.min_y, eval.max_y);
 
     IntersectionConstraint intersection;
-    eval.intersection_violation = intersection.eval_update(
+    eval.intersection_violation = intersection.eval_remove(
         eval.solution,
         eval.intersection_map,
         indices,

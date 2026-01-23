@@ -42,6 +42,9 @@ public:
     [[nodiscard]] const std::vector<Figure>& figures() const { return figures_; }
     [[nodiscard]] const std::vector<Vec2>& centers() const { return centers_; }
     [[nodiscard]] const std::vector<AABB>& aabbs() const { return aabbs_; }
+    [[nodiscard]] const std::vector<std::array<AABB, TREE_NUM_TRIANGLES>>& triangle_aabbs() const {
+        return triangle_aabbs_;
+    }
     [[nodiscard]] const std::vector<float>& max_abs() const { return max_abs_; }
     [[nodiscard]] const std::vector<std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>>& normals() const { return normals_; }
     [[nodiscard]] float max_abs(size_t i) const { return max_abs_[i]; }
@@ -83,10 +86,12 @@ protected:
     std::vector<Figure> figures_;
     std::vector<Vec2> centers_;
     std::vector<AABB> aabbs_;
+    std::vector<std::array<AABB, TREE_NUM_TRIANGLES>> triangle_aabbs_;
     std::vector<float> max_abs_;
     std::vector<std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>> normals_;
     float max_max_abs_{0.0f};
     size_t max_max_abs_idx_{static_cast<size_t>(-1)};
+    int64_t reg_sum_int_{0};  // Cached sum of (int)(1000 * max_abs_) for valid trees
     std::vector<char> valid_;
     int missing_count_{0};
     Grid2D grid_;

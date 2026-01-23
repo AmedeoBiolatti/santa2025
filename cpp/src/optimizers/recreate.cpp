@@ -22,10 +22,10 @@ std::any RandomRecreate::init_state(const SolutionEval& solution) {
     return state;
 }
 
-void RandomRecreate::get_removed_indices(const TreeParamsSoA& params, std::vector<int>& out) {
+void RandomRecreate::get_removed_indices(const Solution& solution, std::vector<int>& out) {
     out.clear();
-    for (size_t i = 0; i < params.size(); ++i) {
-        if (params.is_nan(i)) {
+    for (size_t i = 0; i < solution.size(); ++i) {
+        if (!solution.is_valid(i)) {
             out.push_back(static_cast<int>(i));
         }
     }
@@ -48,7 +48,7 @@ void RandomRecreate::apply(
         rec_state = std::any_cast<RandomRecreateState>(&state);
     }
     auto& removed = rec_state->removed;
-    get_removed_indices(params, removed);
+    get_removed_indices(solution.solution, removed);
 
     if (removed.empty()) {
         // Nothing to recreate

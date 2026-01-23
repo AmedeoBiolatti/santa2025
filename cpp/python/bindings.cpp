@@ -251,7 +251,6 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def_static("create_tree_packing_problem", &tree_packing::Problem::create_tree_packing_problem,
             py::arg("side") = -1.0f)
         .def("eval", &tree_packing::Problem::eval)
-        .def("eval_update", &tree_packing::Problem::eval_update)
         .def("score", &tree_packing::Problem::score)
         .def("objective", &tree_packing::Problem::objective)
         .def("min_pos", &tree_packing::Problem::min_pos)
@@ -372,8 +371,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
     py::class_<tree_packing::RandomRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::RandomRuin>>(m, "RandomRuin")
         .def(py::init<int, bool>(), py::arg("n_remove") = 1, py::arg("verbose") = false);
 
-    // SpatialRuin
-    py::class_<tree_packing::SpatialRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::SpatialRuin>>(m, "SpatialRuin")
+    // CellRuin
+    py::class_<tree_packing::CellRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::CellRuin>>(m, "CellRuin")
         .def(py::init<int, bool>(), py::arg("n_remove") = 1, py::arg("verbose") = false);
 
     // RandomRecreate

@@ -27,8 +27,7 @@ struct Projection {
 [[nodiscard]] float triangles_intersection_score(
     const Triangle& t0,
     const Triangle& t1,
-    float eps = EPSILON,
-    bool assume_valid = false
+    float eps = EPSILON
 );
 
 // Compute intersection score between two triangles using precomputed normals
@@ -37,8 +36,7 @@ struct Projection {
     const Triangle& t1,
     const std::array<Vec2, 3>& n0,
     const std::array<Vec2, 3>& n1,
-    float eps = EPSILON,
-    bool assume_valid = false
+    float eps = EPSILON
 );
 
 
@@ -47,9 +45,7 @@ struct Projection {
 [[nodiscard]] float figure_intersection_score(
     const Figure& f0,
     const Figure& f1,
-    float eps = EPSILON,
-    bool allow_negative = false,
-    bool assume_valid = false
+    float eps = EPSILON
 );
 
 // Compute intersection score between two figures using precomputed normals
@@ -58,9 +54,7 @@ struct Projection {
     const Figure& f1,
     const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
     const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n1,
-    float eps = EPSILON,
-    bool allow_negative = false,
-    bool assume_valid = false
+    float eps = EPSILON
 );
 
 
