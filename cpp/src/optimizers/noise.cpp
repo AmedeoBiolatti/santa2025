@@ -6,13 +6,23 @@ namespace tree_packing {
 
 NoiseOptimizer::NoiseOptimizer(float noise_level, bool verbose)
     : noise_level_(noise_level)
+    , n_change_(1)
+    , verbose_(verbose)
+{}
+
+NoiseOptimizer::NoiseOptimizer(float noise_level, int n_change, bool verbose)
+    : noise_level_(noise_level)
+    , n_change_(n_change)
     , verbose_(verbose)
 {}
 
 std::any NoiseOptimizer::init_state(const SolutionEval& solution) {
     NoiseState state;
     state.indices.reserve(solution.solution.size());
-    state.last_idx = -1;
+    state.selected.reserve(8);
+    state.last_indices.reserve(8);
+    state.last_params.reserve(8);
+    state.new_params.reserve(8);
     state.has_last = false;
     return state;
 }
@@ -45,41 +55,52 @@ void NoiseOptimizer::apply(
     if (indices.empty()) {
         return;
     }
-    int choice = rng.randint(0, static_cast<int>(indices.size() - 1));
-    int idx = indices[static_cast<size_t>(choice)];
+    int k = n_change_;
+    if (k <= 0) {
+        return;
+    }
+    if (k > static_cast<int>(indices.size())) {
+        k = static_cast<int>(indices.size());
+    }
 
-    float dx = noise_level_ * rng.uniform(-1.0f, 1.0f);
-    float dy = noise_level_ * rng.uniform(-1.0f, 1.0f);
-    float da = noise_level_ * rng.uniform(-1.0f, 1.0f);
+    auto& selected = noise_state->selected;
+    rng.choice(static_cast<int>(indices.size()), k, selected);
 
-    TreeParams p = solution.solution.get_params(static_cast<size_t>(idx));
-    noise_state->last_idx = idx;
-    noise_state->last_params = p;
+    auto& last_indices = noise_state->last_indices;
+    last_indices.clear();
+    noise_state->last_params.resize(static_cast<size_t>(k));
+    auto& new_params = noise_state->new_params;
+    new_params.resize(static_cast<size_t>(k));
+
+    for (int i = 0; i < k; ++i) {
+        int idx = indices[static_cast<size_t>(selected[static_cast<size_t>(i)])];
+        TreeParams p = solution.solution.get_params(static_cast<size_t>(idx));
+        noise_state->last_params.set(static_cast<size_t>(i), p);
+        last_indices.push_back(idx);
+
+        float dx = noise_level_ * rng.uniform(-1.0f, 1.0f);
+        float dy = noise_level_ * rng.uniform(-1.0f, 1.0f);
+        float da = noise_level_ * rng.uniform(-1.0f, 1.0f);
+        p.pos.x += dx;
+        p.pos.y += dy;
+        p.angle += da;
+        new_params.set(static_cast<size_t>(i), p);
+    }
+
     noise_state->has_last = true;
-    p.pos.x += dx;
-    p.pos.y += dy;
-    p.angle += da;
-
-    std::vector<int> modified{idx};
-    TreeParamsSoA new_params(1);
-    new_params.set(0, p);
-    problem_->update_and_eval(solution, modified, new_params);
+    problem_->update_and_eval(solution, last_indices, new_params);
 
     if (verbose_) {
-        std::cout << "[NoiseOptimizer] idx=" << idx
-                  << " dx=" << dx << " dy=" << dy << " da=" << da << "\n";
+        std::cout << "[NoiseOptimizer] n=" << k << "\n";
     }
 }
 
 void NoiseOptimizer::rollback(SolutionEval& solution, std::any& state) {
     auto* noise_state = std::any_cast<NoiseState>(&state);
-    if (!noise_state || !noise_state->has_last || noise_state->last_idx < 0) {
+    if (!noise_state || !noise_state->has_last || noise_state->last_indices.empty()) {
         return;
     }
-    TreeParamsSoA params(1);
-    params.set(0, noise_state->last_params);
-    std::vector<int> indices{noise_state->last_idx};
-    problem_->update_and_eval(solution, indices, params);
+    problem_->update_and_eval(solution, noise_state->last_indices, noise_state->last_params);
     noise_state->has_last = false;
 }
 

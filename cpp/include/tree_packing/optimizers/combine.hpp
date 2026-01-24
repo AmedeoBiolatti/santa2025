@@ -57,12 +57,10 @@ private:
     bool verbose_;
 };
 
-// RestoreBest: restores best solution if no improvement for patience iterations
+// RestoreBest: restores best solution every n iterations
 class RestoreBest : public Optimizer {
 public:
-    RestoreBest(OptimizerPtr optimizer, int patience, bool verbose = false);
-
-    void set_problem(Problem* problem) override;
+    explicit RestoreBest(int interval, bool verbose = false);
 
     std::any init_state(const SolutionEval& solution) override;
 
@@ -78,8 +76,7 @@ public:
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
-    OptimizerPtr optimizer_;
-    int patience_;
+    int interval_;
     bool verbose_;
 };
 

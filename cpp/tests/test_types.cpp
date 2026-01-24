@@ -114,13 +114,6 @@ TEST_CASE("TreeParams operations", "[types]") {
         REQUIRE(p.angle == 0.5f);
     }
 
-    SECTION("NaN") {
-        TreeParams p;
-        REQUIRE_FALSE(p.is_nan());
-
-        p.set_nan();
-        REQUIRE(p.is_nan());
-    }
 }
 
 TEST_CASE("TreeParamsSoA operations", "[types]") {

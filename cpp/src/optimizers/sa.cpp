@@ -73,15 +73,6 @@ void SimulatedAnnealing::apply(
         sa_state = std::any_cast<SAState>(&state);
     }
 
-    // Handle reheating with patience
-    if (patience_ > 0) {
-        if (global_state.iters_since_improvement() > static_cast<uint64_t>(patience_)) {
-            // Reset temperature
-            sa_state->iteration = 0;
-            sa_state->counter = 0;
-        }
-    }
-
     // Compute current score before mutation
     float current_score = problem_->score(solution, global_state);
 
@@ -95,7 +86,19 @@ void SimulatedAnnealing::apply(
     float candidate_score = problem_->score(solution, global_state);
     float delta = candidate_score - current_score;
 
-    float temperature = compute_temperature(sa_state->iteration);
+    int iteration = sa_state->iteration;
+    int counter = sa_state->counter;
+    if (patience_ >= 0) {
+        if (global_state.iters_since_improvement() <= 1) {
+            counter = 0;
+        }
+        if (counter > patience_) {
+            iteration = 0;
+            counter = 0;
+        }
+    }
+
+    float temperature = compute_temperature(iteration);
     float accept_prob = std::min(std::exp(-delta / temperature), 1.0f);
     bool accept = rng.uniform() < accept_prob;
 
@@ -108,8 +111,8 @@ void SimulatedAnnealing::apply(
     sa_state->last_accept = accept;
 
     // Update state
-    sa_state->iteration++;
-    sa_state->counter++;
+    sa_state->iteration = iteration + 1;
+    sa_state->counter = counter + 1;
     sa_state->temperature = temperature;
 
     if (verbose_) {

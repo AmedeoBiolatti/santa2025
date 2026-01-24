@@ -3,9 +3,6 @@
 #include "tree_packing/core/tree.hpp"
 #include <algorithm>
 
-#ifdef ENABLE_OPENMP
-#include <omp.h>
-#endif
 
 namespace tree_packing {
 namespace {
@@ -33,20 +30,36 @@ SolutionEval::IntersectionList& ensure_unique_row(
     return *row_ptr;
 }
 
-bool erase_pair(std::vector<std::pair<Index, float>>& list, int key, float& score_out) {
-    Index target = static_cast<Index>(key);
-    for (size_t i = 0; i < list.size(); ++i) {
-        if (list[i].first == target) {
-            score_out = list[i].second;
-            if (i + 1 != list.size()) {
-                list[i] = list.back();
-            }
-            list.pop_back();
-            return true;
-        }
+void erase_entry_with_back(
+    SolutionEval::IntersectionMap& map,
+    size_t row_idx,
+    size_t entry_idx
+) {
+    auto& row = ensure_unique_row(map, row_idx);
+    size_t last = row.size() - 1;
+    if (entry_idx != last) {
+        auto moved = row[last];
+        row[entry_idx] = moved;
+        auto& neighbor_row = ensure_unique_row(map, static_cast<size_t>(moved.neighbor));
+        neighbor_row[static_cast<size_t>(moved.back_index)].back_index = static_cast<int>(entry_idx);
     }
-    return false;
+    row.pop_back();
 }
+
+void add_pair(
+    SolutionEval::IntersectionMap& map,
+    size_t a_idx,
+    size_t b_idx,
+    float score
+) {
+    auto& row_a = ensure_unique_row(map, a_idx);
+    auto& row_b = ensure_unique_row(map, b_idx);
+    int a_pos = static_cast<int>(row_a.size());
+    int b_pos = static_cast<int>(row_b.size());
+    row_a.push_back({static_cast<Index>(b_idx), score, b_pos});
+    row_b.push_back({static_cast<Index>(a_idx), score, a_pos});
+}
+
 }  // namespace
 
 float IntersectionConstraint::compute_pair_score(
@@ -242,8 +255,7 @@ float IntersectionConstraint::eval(
                     centers[c_idx]
                 );
                 if (score <= 0.0f) continue;
-                map[i]->emplace_back(static_cast<Index>(c_idx), score);
-                map[c_idx]->emplace_back(static_cast<Index>(i_idx), score);
+                add_pair(map, i, static_cast<size_t>(c_idx), score);
                 total_violation += 2.0f * score;  // Count both directions
                 count += 2;
             }
@@ -293,11 +305,9 @@ float IntersectionConstraint::eval_update(
 
         auto& row = ensure_unique_row(map, static_cast<size_t>(idx));
         size_t row_size = row.size();
-        for (const auto& [c, score] : row) {
-            total -= 2.0f * score;
-            float removed = 0.0f;
-            auto& neighbor = ensure_unique_row(map, static_cast<size_t>(c));
-            erase_pair(neighbor, idx, removed);
+        for (const auto& entry : row) {
+            total -= 2.0f * entry.score;
+            erase_entry_with_back(map, static_cast<size_t>(entry.neighbor), static_cast<size_t>(entry.back_index));
         }
         count -= static_cast<int>(row_size) * 2;
         row.clear();
@@ -353,8 +363,7 @@ float IntersectionConstraint::eval_update(
                     centers[c_idx]
                 );
                 if (score <= 0.0f) continue;
-                ensure_unique_row(map, static_cast<size_t>(idx)).emplace_back(static_cast<Index>(c_idx), score);
-                ensure_unique_row(map, static_cast<size_t>(c_idx)).emplace_back(static_cast<Index>(idx), score);
+                add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
                 total += 2.0f * score;
                 count += 2;
             }
@@ -395,11 +404,9 @@ float IntersectionConstraint::eval_remove(
 
         auto& row = ensure_unique_row(map, static_cast<size_t>(idx));
         size_t row_size = row.size();
-        for (const auto& [c, score] : row) {
-            total -= 2.0f * score;
-            float removed = 0.0f;
-            auto& neighbor = ensure_unique_row(map, static_cast<size_t>(c));
-            erase_pair(neighbor, idx, removed);
+        for (const auto& entry : row) {
+            total -= 2.0f * entry.score;
+            erase_entry_with_back(map, static_cast<size_t>(entry.neighbor), static_cast<size_t>(entry.back_index));
         }
         count -= static_cast<int>(row_size) * 2;
         row.clear();

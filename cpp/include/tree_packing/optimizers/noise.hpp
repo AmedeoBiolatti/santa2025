@@ -9,6 +9,7 @@ namespace tree_packing {
 class NoiseOptimizer : public Optimizer {
 public:
     explicit NoiseOptimizer(float noise_level = 0.01f, bool verbose = false);
+    NoiseOptimizer(float noise_level, int n_change, bool verbose);
 
     std::any init_state(const SolutionEval& solution) override;
 
@@ -25,14 +26,17 @@ public:
 
 private:
     float noise_level_;
+    int n_change_;
     bool verbose_;
 };
 
 // State for NoiseOptimizer
 struct NoiseState {
     std::vector<int> indices;
-    int last_idx{-1};
-    TreeParams last_params;
+    std::vector<int> selected;
+    std::vector<int> last_indices;
+    TreeParamsSoA last_params;
+    TreeParamsSoA new_params;  // scratch buffer
     bool has_last{false};
 };
 

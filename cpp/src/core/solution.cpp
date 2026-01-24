@@ -35,6 +35,10 @@ bool figure_equal(const Figure& a, const Figure& b, float tol) {
     return true;
 }
 
+bool params_finite(const TreeParams& p) {
+    return std::isfinite(p.pos.x) && std::isfinite(p.pos.y) && std::isfinite(p.angle);
+}
+
 bool normals_equal(
     const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& a,
     const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& b,
@@ -67,6 +71,32 @@ AABB triangle_aabb(const Triangle& tri) {
     return aabb;
 }
 
+void invalidate_cache(
+    Figure& fig,
+    Vec2& center,
+    std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& normals,
+    AABB& aabb,
+    std::array<AABB, TREE_NUM_TRIANGLES>& tri_aabbs,
+    float& max_abs
+) {
+    for (auto& tri : fig.triangles) {
+        tri.v0 = Vec2::nan();
+        tri.v1 = Vec2::nan();
+        tri.v2 = Vec2::nan();
+    }
+    for (auto& tri_normals : normals) {
+        tri_normals[0] = Vec2::nan();
+        tri_normals[1] = Vec2::nan();
+        tri_normals[2] = Vec2::nan();
+    }
+    center = Vec2::nan();
+    aabb = AABB{};
+    max_abs = 0.0f;
+    for (auto& tri_aabb : tri_aabbs) {
+        tri_aabb = AABB{};
+    }
+}
+
 void recompute_max_abs_cache(const std::vector<float>& per_tree, float& out_max, size_t& out_idx) {
     out_max = 0.0f;
     out_idx = static_cast<size_t>(-1);
@@ -91,6 +121,7 @@ Solution::Solution(size_t num_trees) {
     max_max_abs_ = 0.0f;
     max_max_abs_idx_ = static_cast<size_t>(-1);
     valid_.resize(num_trees, false);
+    removed_indices_.reserve(8);  // Typical case: few removed at a time
     missing_count_ = static_cast<int>(num_trees);
     revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
@@ -114,11 +145,12 @@ Solution Solution::init_random(size_t num_trees, float side, uint64_t seed) {
 
 Solution Solution::init_empty(size_t num_trees) {
     Solution sol(num_trees);
-
+    std::fill(sol.valid_.begin(), sol.valid_.end(), false);
+    // All trees are removed initially
+    sol.removed_indices_.resize(num_trees);
     for (size_t i = 0; i < num_trees; ++i) {
-        sol.params_.set_nan(i);
+        sol.removed_indices_[i] = static_cast<int>(i);
     }
-
     sol.recompute_cache();
     sol.revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
     return sol;
@@ -139,28 +171,34 @@ Solution Solution::init(const TreeParamsSoA& params, int grid_n, float grid_size
     params_to_figures(sol.params_, sol.figures_);
     get_tree_centers(sol.params_, sol.centers_);
     for (size_t i = 0; i < params.size(); ++i) {
-        sol.valid_[i] = !sol.params_.is_nan(i);
-        get_tree_normals(sol.params_.angle[i], sol.normals_[i]);
+        sol.valid_[i] = params_finite(sol.params_.get(i));
         if (sol.valid_[i]) {
+            get_tree_normals(sol.params_.angle[i], sol.normals_[i]);
             sol.aabbs_[i] = compute_aabb(sol.figures_[i]);
             sol.max_abs_[i] = compute_aabb_max_abs(sol.aabbs_[i]);
             for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
                 sol.triangle_aabbs_[i][t] = triangle_aabb(sol.figures_[i].triangles[t]);
             }
         } else {
-            sol.aabbs_[i] = AABB{};
-            sol.max_abs_[i] = 0.0f;
-            for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
-                sol.triangle_aabbs_[i][t] = AABB{};
-            }
+            invalidate_cache(
+                sol.figures_[i],
+                sol.centers_[i],
+                sol.normals_[i],
+                sol.aabbs_[i],
+                sol.triangle_aabbs_[i],
+                sol.max_abs_[i]
+            );
         }
     }
     sol.missing_count_ = static_cast<int>(params.size());
     sol.reg_sum_int_ = 0;
+    sol.removed_indices_.reserve(8);
     for (size_t i = 0; i < params.size(); ++i) {
         if (sol.valid_[i]) {
             --sol.missing_count_;
             sol.reg_sum_int_ += (int) (1000.0f * sol.max_abs_[i]);
+        } else {
+            sol.removed_indices_.push_back(static_cast<int>(i));
         }
     }
     recompute_max_abs_cache(sol.max_abs_, sol.max_max_abs_, sol.max_max_abs_idx_);
@@ -174,43 +212,17 @@ Solution Solution::init(const TreeParamsSoA& params, int grid_n, float grid_size
 
 void Solution::set_params(size_t i, const TreeParams& p) {
     params_.set(i, p);
-    update_cache_for(i);
+    if (!valid_[i] && params_finite(p)) {
+        update_cache_on_insertion_for(i);
+    } else {
+        update_cache_for(i, params_finite(p));
+    }
     revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Solution::set_nan(size_t i) {
     revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
-    bool old_valid = valid_[i];
-    float old_max_abs = max_abs_[i];
-    params_.set_nan(i);
-    valid_[i] = false;
-    aabbs_[i] = AABB{};
-    max_abs_[i] = 0.0f;
-    if (old_valid) {
-        reg_sum_int_ -= (int)(1000.0f * old_max_abs);
-    }
-    for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
-        triangle_aabbs_[i][t] = AABB{};
-    }
-    if (old_valid) {
-        ++missing_count_;
-    }
-    if (i == max_max_abs_idx_) {
-        recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
-    }
-    // Update figure to NaN
-    for (auto& tri : figures_[i].triangles) {
-        tri.v0 = Vec2::nan();
-        tri.v1 = Vec2::nan();
-        tri.v2 = Vec2::nan();
-    }
-    for (auto& tri_normals : normals_[i]) {
-        tri_normals[0] = Vec2::nan();
-        tri_normals[1] = Vec2::nan();
-        tri_normals[2] = Vec2::nan();
-    }
-    centers_[i] = Vec2::nan();
-    grid_.update(static_cast<int>(i), Vec2::nan());
+    update_cache_on_removal_for(i);
 }
 
 Solution Solution::update(const TreeParamsSoA& new_params, const std::vector<int>& indices) const {
@@ -219,7 +231,13 @@ Solution Solution::update(const TreeParamsSoA& new_params, const std::vector<int
 
     for (int idx : indices) {
         if (idx >= 0 && static_cast<size_t>(idx) < sol.size()) {
-            sol.update_cache_for(static_cast<size_t>(idx));
+            size_t i = static_cast<size_t>(idx);
+            bool new_valid = params_finite(sol.params_.get(i));
+            if (!sol.valid_[i] && new_valid) {
+                sol.update_cache_on_insertion_for(i);
+            } else {
+                sol.update_cache_for(i, new_valid);
+            }
         }
     }
     sol.revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
@@ -231,7 +249,7 @@ void Solution::recompute_cache() {
     params_to_figures(params_, figures_);
     get_tree_centers(params_, centers_);
     if (valid_.size() != params_.size()) {
-        valid_.resize(params_.size(), false);
+        valid_.assign(params_.size(), true);
     }
     if (aabbs_.size() != params_.size()) {
         aabbs_.resize(params_.size());
@@ -246,28 +264,35 @@ void Solution::recompute_cache() {
         normals_.resize(params_.size());
     }
     for (size_t i = 0; i < params_.size(); ++i) {
-        valid_[i] = !params_.is_nan(i);
-        get_tree_normals(params_.angle[i], normals_[i]);
+        valid_[i] = valid_[i] && params_finite(params_.get(i));
         if (valid_[i]) {
+            get_tree_normals(params_.angle[i], normals_[i]);
             aabbs_[i] = compute_aabb(figures_[i]);
             max_abs_[i] = compute_aabb_max_abs(aabbs_[i]);
             for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
                 triangle_aabbs_[i][t] = triangle_aabb(figures_[i].triangles[t]);
             }
         } else {
-            aabbs_[i] = AABB{};
-            max_abs_[i] = 0.0f;
-            for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
-                triangle_aabbs_[i][t] = AABB{};
-            }
+            invalidate_cache(
+                figures_[i],
+                centers_[i],
+                normals_[i],
+                aabbs_[i],
+                triangle_aabbs_[i],
+                max_abs_[i]
+            );
         }
     }
     missing_count_ = static_cast<int>(params_.size());
     reg_sum_int_ = 0;
+    removed_indices_.clear();
+    removed_indices_.reserve(8);
     for (size_t i = 0; i < params_.size(); ++i) {
         if (valid_[i]) {
             --missing_count_;
             reg_sum_int_ += (int)(1000.0f * max_abs_[i]);
+        } else {
+            removed_indices_.push_back(static_cast<int>(i));
         }
     }
     recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
@@ -275,25 +300,36 @@ void Solution::recompute_cache() {
 }
 
 void Solution::update_cache_for(size_t i) {
+    update_cache_for(i, valid_[i]);
+}
+
+void Solution::update_cache_for(size_t i, bool new_valid) {
     bool old_valid = valid_[i];
     float old_max_abs = max_abs_[i];
     TreeParams p = params_.get(i);
+    if (old_valid && new_valid && params_finite(p)) {
+        update_cache_on_update_for(i, p);
+        return;
+    }
     figures_[i] = params_to_figure(p);
     centers_[i] = get_tree_center(p);
-    valid_[i] = !params_.is_nan(i);
-    get_tree_normals(p.angle, normals_[i]);
+    valid_[i] = new_valid && params_finite(p);
     if (valid_[i]) {
+        get_tree_normals(p.angle, normals_[i]);
         aabbs_[i] = compute_aabb(figures_[i]);
         max_abs_[i] = compute_aabb_max_abs(aabbs_[i]);
         for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
             triangle_aabbs_[i][t] = triangle_aabb(figures_[i].triangles[t]);
         }
     } else {
-        aabbs_[i] = AABB{};
-        max_abs_[i] = 0.0f;
-        for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
-            triangle_aabbs_[i][t] = AABB{};
-        }
+        invalidate_cache(
+            figures_[i],
+            centers_[i],
+            normals_[i],
+            aabbs_[i],
+            triangle_aabbs_[i],
+            max_abs_[i]
+        );
     }
     // Update reg_sum_int_ incrementally
     if (old_valid) reg_sum_int_ -= (int)(1000.0f * old_max_abs);
@@ -301,6 +337,19 @@ void Solution::update_cache_for(size_t i) {
 
     if (old_valid != valid_[i]) {
         missing_count_ += old_valid ? 1 : -1;
+        // Update removed_indices_
+        if (valid_[i]) {
+            // Tree became valid: remove from removed_indices_ (swap-and-pop)
+            int idx = static_cast<int>(i);
+            auto it = std::find(removed_indices_.begin(), removed_indices_.end(), idx);
+            if (it != removed_indices_.end()) {
+                *it = removed_indices_.back();
+                removed_indices_.pop_back();
+            }
+        } else {
+            // Tree became invalid: add to removed_indices_
+            removed_indices_.push_back(static_cast<int>(i));
+        }
     }
     if (max_abs_[i] > max_max_abs_) {
         max_max_abs_ = max_abs_[i];
@@ -309,6 +358,102 @@ void Solution::update_cache_for(size_t i) {
         recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
     }
     grid_.update(static_cast<int>(i), centers_[i]);
+}
+
+void Solution::update_cache_on_removal_for(size_t i) {
+    if (!valid_[i]) {
+        return;
+    }
+    float old_max_abs = max_abs_[i];
+    valid_[i] = false;
+    reg_sum_int_ -= (int)(1000.0f * old_max_abs);
+    removed_indices_.push_back(static_cast<int>(i));
+    ++missing_count_;
+    grid_.remove(static_cast<int>(i));
+    invalidate_cache(
+        figures_[i],
+        centers_[i],
+        normals_[i],
+        aabbs_[i],
+        triangle_aabbs_[i],
+        max_abs_[i]
+    );
+    if (i == max_max_abs_idx_) {
+        recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
+    }
+}
+
+void Solution::update_cache_on_update_for(size_t i, const TreeParams& p) {
+    float old_max_abs = max_abs_[i];
+    figures_[i] = params_to_figure(p);
+    centers_[i] = get_tree_center(p);
+    get_tree_normals(p.angle, normals_[i]);
+    aabbs_[i] = compute_aabb(figures_[i]);
+    max_abs_[i] = compute_aabb_max_abs(aabbs_[i]);
+    for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
+        triangle_aabbs_[i][t] = triangle_aabb(figures_[i].triangles[t]);
+    }
+    valid_[i] = true;
+    reg_sum_int_ += (int)(1000.0f * (max_abs_[i] - old_max_abs));
+    if (max_abs_[i] > max_max_abs_) {
+        max_max_abs_ = max_abs_[i];
+        max_max_abs_idx_ = i;
+    } else if (i == max_max_abs_idx_ && max_abs_[i] < max_max_abs_) {
+        recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
+    }
+    grid_.update(static_cast<int>(i), centers_[i]);
+}
+
+int Solution::update_cache_on_transition(size_t i, bool new_valid) {
+    bool old_valid = valid_[i];
+    if (old_valid && new_valid) {
+        TreeParams p = params_.get(i);
+        update_cache_on_update_for(i, p);
+        return 0;
+    }
+    if (!old_valid && new_valid) {
+        update_cache_on_insertion_for(i);
+        return 1;
+    }
+    if (old_valid && !new_valid) {
+        update_cache_on_removal_for(i);
+        return -1;
+    }
+    return 0;
+}
+
+void Solution::update_cache_on_insertion_for(size_t i) {
+    if (valid_[i]) {
+        return;
+    }
+    TreeParams p = params_.get(i);
+    if (!params_finite(p)) {
+        return;
+    }
+    figures_[i] = params_to_figure(p);
+    centers_[i] = get_tree_center(p);
+    get_tree_normals(p.angle, normals_[i]);
+    aabbs_[i] = compute_aabb(figures_[i]);
+    max_abs_[i] = compute_aabb_max_abs(aabbs_[i]);
+    for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
+        triangle_aabbs_[i][t] = triangle_aabb(figures_[i].triangles[t]);
+    }
+    valid_[i] = true;
+    reg_sum_int_ += (int)(1000.0f * max_abs_[i]);
+    int idx = static_cast<int>(i);
+    auto it = std::find(removed_indices_.begin(), removed_indices_.end(), idx);
+    if (it != removed_indices_.end()) {
+        *it = removed_indices_.back();
+        removed_indices_.pop_back();
+    }
+    if (missing_count_ > 0) {
+        --missing_count_;
+    }
+    if (max_max_abs_idx_ == static_cast<size_t>(-1) || max_abs_[i] > max_max_abs_) {
+        max_max_abs_ = max_abs_[i];
+        max_max_abs_idx_ = i;
+    }
+    grid_.insert(static_cast<int>(i), centers_[i]);
 }
 
 void Solution::copy_from(const Solution& other) {
@@ -325,6 +470,7 @@ void Solution::copy_from(const Solution& other) {
     max_max_abs_idx_ = other.max_max_abs_idx_;
     reg_sum_int_ = other.reg_sum_int_;
     valid_ = other.valid_;
+    removed_indices_ = other.removed_indices_;
     missing_count_ = other.missing_count_;
     grid_ = other.grid_;
     revision_ = other.revision_;
@@ -349,21 +495,21 @@ bool Solution::validate_cache(float tol, bool check_grid) const {
 
     int expected_missing = 0;
     for (size_t i = 0; i < n; ++i) {
-        bool expected_valid = !params_.is_nan(i);
+        bool expected_valid = valid_[i] && params_finite(params_.get(i));
         if (valid_[i] != expected_valid) {
-            return false;
-        }
-        if (!figure_equal(figures_[i], expected_figures[i], tol)) {
-            return false;
-        }
-        if (!vec2_equal(centers_[i], expected_centers[i], tol)) {
-            return false;
-        }
-        if (!normals_equal(normals_[i], expected_normals[i], tol)) {
             return false;
         }
 
         if (expected_valid) {
+            if (!figure_equal(figures_[i], expected_figures[i], tol)) {
+                return false;
+            }
+            if (!vec2_equal(centers_[i], expected_centers[i], tol)) {
+                return false;
+            }
+            if (!normals_equal(normals_[i], expected_normals[i], tol)) {
+                return false;
+            }
             AABB expected_aabb = compute_aabb(expected_figures[i]);
             if (!aabb_equal(aabbs_[i], expected_aabb, tol)) {
                 return false;
@@ -380,6 +526,19 @@ bool Solution::validate_cache(float tol, bool check_grid) const {
             }
         } else {
             expected_missing++;
+            if (!figures_[i].is_nan()) {
+                return false;
+            }
+            if (!centers_[i].is_nan()) {
+                return false;
+            }
+            for (const auto& tri_normals : normals_[i]) {
+                for (const auto& nvec : tri_normals) {
+                    if (!nvec.is_nan()) {
+                        return false;
+                    }
+                }
+            }
             if (!aabb_is_default(aabbs_[i])) {
                 return false;
             }

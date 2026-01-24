@@ -211,8 +211,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
                     continue;
                 }
                 py::list row;
-                for (const auto& [idx, score] : *row_ptr) {
-                    row.append(py::make_tuple(idx, score));
+                for (const auto& entry : *row_ptr) {
+                    row.append(py::make_tuple(entry.neighbor, entry.score));
                 }
                 out.append(row);
             }
@@ -231,11 +231,11 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             for (size_t i = 0; i < n; ++i) {
                 const auto& row_ptr = self.intersection_map[i];
                 if (!row_ptr) continue;
-                for (const auto& [idx, score] : *row_ptr) {
-                    if (idx < 0) continue;
-                    size_t j = static_cast<size_t>(idx);
+                for (const auto& entry : *row_ptr) {
+                    if (entry.neighbor < 0) continue;
+                    size_t j = static_cast<size_t>(entry.neighbor);
                     if (j >= n) continue;
-                    buf(static_cast<py::ssize_t>(i), static_cast<py::ssize_t>(j)) = score;
+                    buf(static_cast<py::ssize_t>(i), static_cast<py::ssize_t>(j)) = entry.score;
                 }
             }
             return mat;
@@ -383,9 +383,27 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             py::arg("delta") = 0.35f,
             py::arg("verbose") = false);
 
+    // GridCellRecreate
+    py::class_<tree_packing::GridCellRecreate, tree_packing::Optimizer, std::shared_ptr<tree_packing::GridCellRecreate>>(m, "GridCellRecreate")
+        .def(py::init<int, int, int, int, int, bool>(),
+            py::arg("max_recreate") = 1,
+            py::arg("cell_min") = 0,
+            py::arg("cell_max") = 4,
+            py::arg("neighbor_min") = 1,
+            py::arg("neighbor_max") = -1,
+            py::arg("verbose") = false);
+
     // NoiseOptimizer
     py::class_<tree_packing::NoiseOptimizer, tree_packing::Optimizer, std::shared_ptr<tree_packing::NoiseOptimizer>>(m, "NoiseOptimizer")
-        .def(py::init<float, bool>(), py::arg("noise_level") = 0.01f, py::arg("verbose") = false);
+        .def(py::init<float, bool>(), py::arg("noise_level") = 0.01f, py::arg("verbose") = false)
+        .def(py::init<float, int, bool>(),
+            py::arg("noise_level") = 0.01f,
+            py::arg("n_change") = 1,
+            py::arg("verbose") = false);
+
+    // RestoreBest
+    py::class_<tree_packing::RestoreBest, tree_packing::Optimizer, std::shared_ptr<tree_packing::RestoreBest>>(m, "RestoreBest")
+        .def(py::init<int, bool>(), py::arg("interval"), py::arg("verbose") = false);
 
     // Chain
     py::class_<tree_packing::Chain, tree_packing::Optimizer, std::shared_ptr<tree_packing::Chain>>(m, "Chain")

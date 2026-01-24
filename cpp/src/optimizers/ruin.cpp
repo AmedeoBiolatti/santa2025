@@ -13,8 +13,15 @@ RandomRuin::RandomRuin(int n_remove, bool verbose)
 }
 
 std::any RandomRuin::init_state(const SolutionEval& solution) {
+    (void)solution;
     RuinState state;
-    state.indices.reserve(static_cast<size_t>(n_remove_));
+    // Reserve for typical case (<=4 updates)
+    state.indices.reserve(8);
+    state.prev_params.reserve(8);
+    state.prev_valid.reserve(8);
+    state.valid_indices.reserve(8);
+    state.invalid_indices.reserve(8);
+    state.valid_params.reserve(8);
     return state;
 }
 
@@ -60,16 +67,15 @@ void RandomRuin::apply(
 
     // Create new solution with updated params
     ruin_state->prev_params.resize(indices.size());
+    ruin_state->prev_valid.assign(indices.size(), 0);
     for (size_t k = 0; k < indices.size(); ++k) {
         int idx = indices[k];
         if (idx < 0 || static_cast<size_t>(idx) >= n) {
-            ruin_state->prev_params.set_nan(k);
             continue;
         }
         if (solution.solution.is_valid(static_cast<size_t>(idx))) {
-            ruin_state->prev_params.set(k, solution.solution.get_params(static_cast<size_t>(idx)));
-        } else {
-            ruin_state->prev_params.set_nan(k);
+            ruin_state->prev_params[k] = solution.solution.get_params(static_cast<size_t>(idx));
+            ruin_state->prev_valid[k] = 1;
         }
     }
     problem_->remove_and_eval(solution, indices);
@@ -88,18 +94,21 @@ void RandomRuin::rollback(SolutionEval& solution, std::any& state) {
     if (indices.empty()) {
         return;
     }
-    std::vector<int> valid_indices;
-    std::vector<int> invalid_indices;
-    TreeParamsSoA valid_params;
+    auto& valid_indices = ruin_state->valid_indices;
+    auto& invalid_indices = ruin_state->invalid_indices;
+    auto& valid_params = ruin_state->valid_params;
+    valid_indices.clear();
+    invalid_indices.clear();
+    valid_params.clear();
     for (size_t k = 0; k < indices.size(); ++k) {
         int idx = indices[k];
-        if (ruin_state->prev_params.is_nan(k)) {
+        if (!ruin_state->prev_valid[k]) {
             invalid_indices.push_back(idx);
         } else {
             size_t out_idx = valid_indices.size();
             valid_indices.push_back(idx);
             valid_params.resize(valid_indices.size());
-            valid_params.set(out_idx, ruin_state->prev_params.get(k));
+            valid_params.set(out_idx, ruin_state->prev_params[k]);
         }
     }
     if (!invalid_indices.empty()) {
@@ -122,8 +131,18 @@ CellRuin::CellRuin(int n_remove, bool verbose)
 
 std::any CellRuin::init_state(const SolutionEval& solution) {
     RuinState state;
-    state.indices.reserve(static_cast<size_t>(n_remove_));
+    // Reserve for typical case (<=4 updates)
+    state.indices.reserve(8);
     state.distances.reserve(solution.solution.size());
+    state.prev_params.reserve(8);
+    state.prev_valid.reserve(8);
+    state.valid_indices.reserve(8);
+    state.invalid_indices.reserve(8);
+    state.valid_params.reserve(8);
+    // For CellRuin specific scratch
+    int N = solution.solution.grid().grid_N();
+    state.eligible_cells.reserve(static_cast<size_t>(N * N));
+    state.cell_items.reserve(16);
     return state;
 }
 
@@ -153,20 +172,21 @@ void CellRuin::apply(
         }
     };
 
-    std::vector<std::pair<int, int>> eligible_cells;
-    eligible_cells.reserve(static_cast<size_t>(N * N));
-    for (int i = 1; i < N - 1; ++i) {
-        for (int j = 1; j < N - 1; ++j) {
-            if (grid.cell_count(i, j) >= n_remove_) {
-                eligible_cells.emplace_back(i, j);
-            }
+    auto& eligible_cells = ruin_state->eligible_cells;
+    eligible_cells.clear();
+    // Use non_empty_cells() for O(occupied) instead of O(N^2) iteration
+    for (const auto& [i, j] : grid.non_empty_cells()) {
+        // Skip padding cells
+        if (i < 1 || i >= N - 1 || j < 1 || j >= N - 1) continue;
+        if (grid.cell_count(i, j) >= n_remove_) {
+            eligible_cells.emplace_back(i, j);
         }
     }
 
     if (eligible_cells.empty()) {
         // Fallback: remove random valid indices.
         for (size_t i = 0; i < params.size(); ++i) {
-            if (!params.is_nan(i)) {
+            if (solution.solution.is_valid(i)) {
                 indices.push_back(static_cast<int>(i));
             }
         }
@@ -178,7 +198,7 @@ void CellRuin::apply(
         indices.resize(static_cast<size_t>(count));
     } else {
         auto [ci, cj] = eligible_cells[rng.randint(0, static_cast<int>(eligible_cells.size()) - 1)];
-        std::vector<Index> cell_items;
+        auto& cell_items = ruin_state->cell_items;
         grid.get_items_in_cell(ci, cj, cell_items);
         for (Index idx : cell_items) {
             if (idx < 0) continue;
@@ -187,7 +207,7 @@ void CellRuin::apply(
         if (static_cast<int>(indices.size()) < n_remove_) {
             indices.clear();
             for (size_t i = 0; i < params.size(); ++i) {
-                if (!params.is_nan(i)) {
+                if (solution.solution.is_valid(i)) {
                     indices.push_back(static_cast<int>(i));
                 }
             }
@@ -201,16 +221,15 @@ void CellRuin::apply(
 
     // Create new solution with updated params
     ruin_state->prev_params.resize(indices.size());
+    ruin_state->prev_valid.assign(indices.size(), 0);
     for (size_t k = 0; k < indices.size(); ++k) {
         int idx = indices[k];
         if (idx < 0 || static_cast<size_t>(idx) >= params.size()) {
-            ruin_state->prev_params.set_nan(k);
             continue;
         }
         if (solution.solution.is_valid(static_cast<size_t>(idx))) {
-            ruin_state->prev_params.set(k, solution.solution.get_params(static_cast<size_t>(idx)));
-        } else {
-            ruin_state->prev_params.set_nan(k);
+            ruin_state->prev_params[k] = solution.solution.get_params(static_cast<size_t>(idx));
+            ruin_state->prev_valid[k] = 1;
         }
     }
     problem_->remove_and_eval(solution, indices);
@@ -229,18 +248,21 @@ void CellRuin::rollback(SolutionEval& solution, std::any& state) {
     if (indices.empty()) {
         return;
     }
-    std::vector<int> valid_indices;
-    std::vector<int> invalid_indices;
-    TreeParamsSoA valid_params;
+    auto& valid_indices = ruin_state->valid_indices;
+    auto& invalid_indices = ruin_state->invalid_indices;
+    auto& valid_params = ruin_state->valid_params;
+    valid_indices.clear();
+    invalid_indices.clear();
+    valid_params.clear();
     for (size_t k = 0; k < indices.size(); ++k) {
         int idx = indices[k];
-        if (ruin_state->prev_params.is_nan(k)) {
+        if (!ruin_state->prev_valid[k]) {
             invalid_indices.push_back(idx);
         } else {
             size_t out_idx = valid_indices.size();
             valid_indices.push_back(idx);
             valid_params.resize(valid_indices.size());
-            valid_params.set(out_idx, ruin_state->prev_params.get(k));
+            valid_params.set(out_idx, ruin_state->prev_params[k]);
         }
     }
     if (!invalid_indices.empty()) {

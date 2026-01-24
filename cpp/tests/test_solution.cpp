@@ -65,7 +65,7 @@ TEST_CASE("Solution modification", "[solution]") {
 
         sol.set_nan(2);
         REQUIRE(sol.n_missing() == 1);
-        REQUIRE(sol.params().is_nan(2));
+        REQUIRE_FALSE(sol.is_valid(2));
     }
 
     SECTION("Update with indices") {

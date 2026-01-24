@@ -1,5 +1,6 @@
 #include "tree_packing/optimizers/combine.hpp"
 #include <iostream>
+#include <limits>
 #include <numeric>
 
 namespace tree_packing {
@@ -11,9 +12,9 @@ struct RepeatState {
 };
 
 struct RestoreBestState {
-    std::any inner_state;
     SolutionEval backup;
     bool restored{false};
+    uint64_t last_iteration{std::numeric_limits<uint64_t>::max()};
 };
 
 struct RandomChoiceState {
@@ -154,24 +155,18 @@ OptimizerPtr Repeat::clone() const {
 }
 
 // RestoreBest implementation
-RestoreBest::RestoreBest(OptimizerPtr optimizer, int patience, bool verbose)
-    : optimizer_(std::move(optimizer))
-    , patience_(patience)
+RestoreBest::RestoreBest(int interval, bool verbose)
+    : interval_(interval)
     , verbose_(verbose)
 {
-    if (patience_ < 0) patience_ = 0;
-}
-
-void RestoreBest::set_problem(Problem* problem) {
-    Optimizer::set_problem(problem);
-    optimizer_->set_problem(problem);
+    if (interval_ < 0) interval_ = 0;
 }
 
 std::any RestoreBest::init_state(const SolutionEval& solution) {
     RestoreBestState state;
-    state.inner_state = optimizer_->init_state(solution);
     state.backup = solution;
     state.restored = false;
+    state.last_iteration = std::numeric_limits<uint64_t>::max();
     return state;
 }
 
@@ -189,21 +184,23 @@ void RestoreBest::apply(
     rb_state->backup.copy_from(solution);
     rb_state->restored = false;
 
-    // Restore best if no improvement for patience iterations
-    if (global_state.iters_since_improvement() >= static_cast<uint64_t>(patience_)) {
-        const auto* best = global_state.best_solution();
-        if (best != nullptr) {
-            solution = *best;
-            rb_state->restored = true;
-            if (verbose_) {
-                std::cout << "[RestoreBest] restored best\n";
+    uint64_t iteration = global_state.iteration();
+    if (interval_ > 0 && rb_state->last_iteration != iteration) {
+        rb_state->last_iteration = iteration;
+        if ((iteration + 1) % static_cast<uint64_t>(interval_) == 0) {
+            const auto* best = global_state.best_solution();
+            if (best != nullptr) {
+                solution.copy_from(*best);
+                rb_state->restored = true;
+                if (verbose_) {
+                    std::cout << "[RestoreBest] restored best\n";
+                }
+            } else if (verbose_) {
+                std::cout << "[RestoreBest] no best to restore\n";
             }
-        } else if (verbose_) {
-            std::cout << "[RestoreBest] no best to restore\n";
         }
     }
-
-    optimizer_->apply(solution, rb_state->inner_state, global_state, rng);
+    (void)rng;
 }
 
 void RestoreBest::rollback(SolutionEval& solution, std::any& state) {
@@ -211,7 +208,6 @@ void RestoreBest::rollback(SolutionEval& solution, std::any& state) {
     if (!rb_state) {
         return;
     }
-    optimizer_->rollback(solution, rb_state->inner_state);
     if (rb_state->restored) {
         solution.copy_from(rb_state->backup);
         rb_state->restored = false;
@@ -219,7 +215,7 @@ void RestoreBest::rollback(SolutionEval& solution, std::any& state) {
 }
 
 OptimizerPtr RestoreBest::clone() const {
-    return std::make_unique<RestoreBest>(optimizer_->clone(), patience_, verbose_);
+    return std::make_unique<RestoreBest>(interval_, verbose_);
 }
 
 // RandomChoice implementation

@@ -28,6 +28,8 @@ public:
 
     // Update position of item k
     void update(int k, const Vec2& new_center);
+    void insert(int k, const Vec2& new_center);
+    void remove(int k);
 
     // Get candidate indices near item k (from its cell's neighborhood)
     // Returns indices, with -1 for empty slots
@@ -49,6 +51,9 @@ public:
     // Get count of items in a cell
     [[nodiscard]] int cell_count(int i, int j) const;
 
+    // Get all non-empty cells (for efficient iteration)
+    [[nodiscard]] const std::vector<std::pair<int, int>>& non_empty_cells() const { return non_empty_cells_; }
+
     // Compute cell indices for a position
     std::pair<int, int> compute_ij(const Vec2& pos) const;
 
@@ -69,7 +74,7 @@ public:
 private:
     int n_{20};          // Number of cells per dimension
     int N_{22};          // N = n + 2 (with padding)
-    int capacity_{16};   // Max items per cell
+    int capacity_{8};   // Max items per cell
     float size_{1.04f};  // Cell size
     float center_{0.0f}; // Grid center
     // ij2k[i * N * capacity + j * capacity + slot] = item index (-1 if empty)
@@ -82,6 +87,10 @@ private:
     std::vector<AABB> cell_bounds_;
     // Precomputed cell bounds expanded by CENTER_R
     std::vector<AABB> cell_bounds_expanded_;
+    // List of non-empty cells for efficient iteration
+    std::vector<std::pair<int, int>> non_empty_cells_;
+    // Map from cell (i*N+j) to index in non_empty_cells_ (-1 if empty)
+    std::vector<int> cell_to_non_empty_idx_;
 
     [[nodiscard]] int cell_index(int i, int j) const {
         return i * N_ * capacity_ + j * capacity_;

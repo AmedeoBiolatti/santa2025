@@ -30,6 +30,13 @@ public:
         const TreeParamsSoA& new_params
     ) const;
 
+    // Specialized path for inserting previously invalid trees
+    void insert_and_eval(
+        SolutionEval& eval,
+        const std::vector<int>& indices,
+        const TreeParamsSoA& new_params
+    ) const;
+
     // Mark solution params as NaN in-place and evaluate full objective/constraints.
     void remove_and_eval(
         SolutionEval& eval,

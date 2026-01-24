@@ -11,7 +11,7 @@ option(BUILD_PYTHON_BINDINGS "Build Python bindings with pybind11" ON)
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_EXAMPLES "Build examples" ON)
 option(ENABLE_SIMD "Enable SIMD optimizations (AVX2)" ON)
-option(ENABLE_OPENMP "Enable OpenMP parallelization" ON)
+option(ENABLE_OPENMP "Enable OpenMP parallelization" OFF)
 
 # Compiler flags
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -114,7 +114,12 @@ if(BUILD_TESTS)
         tests/test_optimizers.cpp
         tests/test_incremental.cpp
     )
-    target_link_libraries(test_tree_packing PRIVATE tree_packing Catch2::Catch2WithMain)
+    target_link_libraries(test_tree_packing PRIVATE
+        tree_packing
+        Catch2::Catch2WithMain
+        Catch2::Catch2
+    )
+    target_link_options(test_tree_packing PRIVATE "-Wl,--start-group" "-Wl,--end-group")
 
     include(CTest)
     include(Catch)
@@ -128,4 +133,7 @@ if(BUILD_EXAMPLES)
 
     add_executable(example_profile_basic examples/profile_basic.cpp)
     target_link_libraries(example_profile_basic PRIVATE tree_packing)
+
+    add_executable(benchmark examples/benchmark.cpp)
+    target_link_libraries(benchmark PRIVATE tree_packing)
 endif()

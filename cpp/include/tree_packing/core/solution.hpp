@@ -64,6 +64,9 @@ public:
     // Count missing (NaN) trees
     [[nodiscard]] int n_missing() const { return missing_count_; }
 
+    // Get indices of removed (invalid) trees - O(1), no iteration needed
+    [[nodiscard]] const std::vector<int>& removed_indices() const { return removed_indices_; }
+
     // Regularization term (max absolute position)
     [[nodiscard]] float reg() const;
 
@@ -93,11 +96,17 @@ protected:
     size_t max_max_abs_idx_{static_cast<size_t>(-1)};
     int64_t reg_sum_int_{0};  // Cached sum of (int)(1000 * max_abs_) for valid trees
     std::vector<char> valid_;
+    std::vector<int> removed_indices_;  // Tracks invalid tree indices (order doesn't matter)
     int missing_count_{0};
     Grid2D grid_;
     uint64_t revision_{0};
 
     void update_cache_for(size_t i);
+    void update_cache_for(size_t i, bool new_valid);
+    void update_cache_on_removal_for(size_t i);
+    void update_cache_on_insertion_for(size_t i);
+    void update_cache_on_update_for(size_t i, const TreeParams& p);
+    int update_cache_on_transition(size_t i, bool new_valid);
 };
 
 // Evaluated solution with objective and constraints
@@ -111,7 +120,12 @@ struct SolutionEval {
     int intersection_count{0};
 
     // Intersection map (cached for incremental updates)
-    using IntersectionList = std::vector<std::pair<Index, float>>;
+    struct IntersectionEntry {
+        Index neighbor{-1};
+        float score{0.0f};
+        int back_index{-1};
+    };
+    using IntersectionList = std::vector<IntersectionEntry>;
     using IntersectionMap = std::vector<std::shared_ptr<IntersectionList>>;
     IntersectionMap intersection_map;
 

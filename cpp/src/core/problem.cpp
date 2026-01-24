@@ -6,6 +6,7 @@
 #include "tree_packing/constraints/intersection.hpp"
 #include "tree_packing/constraints/bounds.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -179,51 +180,69 @@ void Problem::update_and_eval(
     const std::vector<int>& indices,
     const TreeParamsSoA& new_params
 ) const {
+#ifndef NDEBUG
     size_t n = indices.size();
     if (new_params.size() != n) {
         throw std::runtime_error("update_and_eval: indices and new_params size mismatch");
     }
 
+    for (int idx : indices) {
+        assert(idx >= 0);
+        assert(static_cast<size_t>(idx) < eval.solution.size());
+    }
+    bool all_insertions = n > 0;
+    for (size_t k = 0; k < n && all_insertions; ++k) {
+        size_t i = static_cast<size_t>(indices[k]);
+        if (eval.solution.valid_[i]) {
+            all_insertions = false;
+            break;
+        }
+        TreeParams p = new_params.get(k);
+        if (!std::isfinite(p.pos.x) || !std::isfinite(p.pos.y) || !std::isfinite(p.angle)) {
+            all_insertions = false;
+            break;
+        }
+    }
+#endif
     bool recompute_max_abs = false;
     bool recompute_min_x = false;
     bool recompute_max_x = false;
     bool recompute_min_y = false;
     bool recompute_max_y = false;
 
-    for (size_t k=0; k<indices.size(); k++){
-        auto i = indices[k];
+    const size_t n = indices.size();
+    for (size_t k = 0; k < n; ++k) {
+        int idx = indices[k];
+        size_t i = static_cast<size_t>(idx);
         TreeParams p = new_params.get(k);
 
-        bool old_valid = eval.solution.valid_[i];
+
         eval.solution.params_.x[i] = p.pos.x;
         eval.solution.params_.y[i] = p.pos.y;
         eval.solution.params_.angle[i] = p.angle;
-        eval.solution.update_cache_for(static_cast<size_t>(i));
-        bool new_valid = eval.solution.valid_[i];
-        if (old_valid != new_valid) {
-            eval.valid_count += new_valid ? 1 : -1;
-        }
-        if (eval.min_x_idx == i) {
+        eval.solution.update_cache_on_update_for(i, p);
+
+        if (eval.min_x_idx == idx) {
             recompute_min_x = true;
-        } else if (new_valid && eval.solution.aabbs_[i].min.x < eval.min_x) {
+        } else if (eval.solution.aabbs_[i].min.x < eval.min_x) {
             eval.min_x = eval.solution.aabbs_[i].min.x;
             eval.min_x_idx = static_cast<Index>(i);
         }
-        if (eval.max_x_idx == i) {
+        if (eval.max_x_idx == idx) {
             recompute_max_x = true;
-        } else if (new_valid && eval.solution.aabbs_[i].max.x > eval.max_x) {
+        } else if (eval.solution.aabbs_[i].max.x > eval.max_x) {
             eval.max_x = eval.solution.aabbs_[i].max.x;
             eval.max_x_idx = static_cast<Index>(i);
         }
-        if (eval.min_y_idx == i) {
+        if (eval.min_y_idx == idx) {
             recompute_min_y = true;
-        } else if (new_valid && eval.solution.aabbs_[i].min.y < eval.min_y) {
+        } else if (eval.solution.aabbs_[i].min.y < eval.min_y) {
             eval.min_y = eval.solution.aabbs_[i].min.y;
             eval.min_y_idx = static_cast<Index>(i);
         }
-        if (eval.max_y_idx == i) {
+        if (eval.max_y_idx == idx) {
             recompute_max_y = true;
-        } else if (new_valid && eval.solution.aabbs_[i].max.y > eval.max_y) {
+        } else if (eval.solution.aabbs_[i].max.y > eval.max_y) {
             eval.max_y = eval.solution.aabbs_[i].max.y;
             eval.max_y_idx = static_cast<Index>(i);
         }
@@ -302,10 +321,97 @@ void Problem::update_and_eval(
     eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
+void Problem::insert_and_eval(
+    SolutionEval& eval,
+    const std::vector<int>& indices,
+    const TreeParamsSoA& new_params
+) const {
+    const size_t n = indices.size();
+#ifndef NDEBUG
+    if (new_params.size() != n) {
+        throw std::runtime_error("insert_and_eval: indices and new_params size mismatch");
+    }
+    for (int idx : indices) {
+        assert(idx >= 0);
+        assert(static_cast<size_t>(idx) < eval.solution.size());
+    }
+    for (size_t k = 0; k < n; ++k) {
+        TreeParams p = new_params.get(k);
+        assert(std::isfinite(p.pos.x) && std::isfinite(p.pos.y) && std::isfinite(p.angle));
+    }
+#endif
+
+    if (n == 0) {
+        eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    for (size_t k = 0; k < n; ++k) {
+        size_t i = static_cast<size_t>(indices[k]);
+        TreeParams p = new_params.get(k);
+
+        eval.solution.params_.x[i] = p.pos.x;
+        eval.solution.params_.y[i] = p.pos.y;
+        eval.solution.params_.angle[i] = p.angle;
+        eval.solution.update_cache_on_insertion_for(i);
+
+        ++eval.valid_count;
+
+        const AABB& aabb = eval.solution.aabbs_[i];
+        if (aabb.min.x < eval.min_x) {
+            eval.min_x = aabb.min.x;
+            eval.min_x_idx = static_cast<Index>(i);
+        }
+        if (aabb.max.x > eval.max_x) {
+            eval.max_x = aabb.max.x;
+            eval.max_x_idx = static_cast<Index>(i);
+        }
+        if (aabb.min.y < eval.min_y) {
+            eval.min_y = aabb.min.y;
+            eval.min_y_idx = static_cast<Index>(i);
+        }
+        if (aabb.max.y > eval.max_y) {
+            eval.max_y = aabb.max.y;
+            eval.max_y_idx = static_cast<Index>(i);
+        }
+
+        float tree_max_abs = eval.solution.max_abs_[i];
+        if (eval.solution.max_max_abs_idx_ == static_cast<size_t>(-1) || tree_max_abs > eval.solution.max_max_abs_) {
+            eval.solution.max_max_abs_ = tree_max_abs;
+            eval.solution.max_max_abs_idx_ = i;
+        }
+    }
+
+    float delta_x = eval.max_x - eval.min_x;
+    float delta_y = eval.max_y - eval.min_y;
+    float length = std::max(delta_x, delta_y);
+    eval.objective = (length * length) / static_cast<float>(eval.solution.size());
+
+    BoundsConstraint bounds(min_pos_, max_pos_);
+    eval.bounds_violation = bounds.eval_update(eval.min_x, eval.max_x, eval.min_y, eval.max_y);
+
+    IntersectionConstraint intersection;
+    eval.intersection_violation = intersection.eval_update(
+        eval.solution,
+        eval.intersection_map,
+        indices,
+        eval.intersection_violation,
+        eval.intersection_count,
+        &eval.intersection_count
+    );
+    eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
+}
+
 void Problem::remove_and_eval(
     SolutionEval& eval,
     const std::vector<int>& indices
 ) const {
+#ifndef NDEBUG
+    for (int idx : indices) {
+        assert(idx >= 0);
+        assert(static_cast<size_t>(idx) < eval.solution.size());
+    }
+#endif
     bool recompute_max_abs = false;
     bool recompute_min_x = false;
     bool recompute_max_x = false;
@@ -315,8 +421,8 @@ void Problem::remove_and_eval(
     for (int idx : indices) {
         size_t i = static_cast<size_t>(idx);
         bool was_valid = eval.solution.valid_[i];
-        eval.solution.set_nan(i);
         if (was_valid) {
+            eval.solution.update_cache_on_removal_for(i);
             eval.valid_count -= 1;
         }
         if (eval.min_x_idx == idx) {

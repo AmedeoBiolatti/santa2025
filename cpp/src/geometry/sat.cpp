@@ -339,9 +339,6 @@ void compute_intersection_matrix(
     size_t n = figures.size();
     matrix.resize(n * n, 0.0f);
 
-#ifdef ENABLE_OPENMP
-    #pragma omp parallel for schedule(dynamic)
-#endif
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = i + 1; j < n; ++j) {
             float score = figure_intersection_score(figures[i], figures[j]);
@@ -362,9 +359,6 @@ void update_intersection_matrix(
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
 
         // Update row and column for this index
-#ifdef ENABLE_OPENMP
-        #pragma omp parallel for
-#endif
         for (size_t j = 0; j < n; ++j) {
             if (j == static_cast<size_t>(idx)) {
                 matrix[idx * n + j] = 0.0f;  // Diagonal
