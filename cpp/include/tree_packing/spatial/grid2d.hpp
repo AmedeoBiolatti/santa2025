@@ -13,6 +13,7 @@ constexpr std::array<std::pair<int, int>, 9> NEIGHBOR_DELTAS = {{
     {0, 0},  {-1, 0},  {+1, 0},
     {0, +1}, {-1, +1}, {+1, +1}
 }};
+constexpr size_t CAPACITY = 8;
 
 // 2D spatial grid for efficient neighbor queries
 // Uses padding to avoid boundary checks
@@ -21,10 +22,10 @@ public:
     Grid2D() = default;
 
     // Create empty grid
-    static Grid2D empty(size_t num_items, int n = 20, float size = 1.04f, int capacity = 16, float center = 0.0f);
+    static Grid2D empty(size_t num_items, int n = 20, float size = 1.04f, int capacity = CAPACITY, float center = 0.0f);
 
     // Initialize grid with centers
-    static Grid2D init(const std::vector<Vec2>& centers, int n = 16, int capacity = 8, float size = 1.04f, float center = 0.0f);
+    static Grid2D init(const std::vector<Vec2>& centers, int n = 16, int capacity = CAPACITY, float size = 1.04f, float center = 0.0f);
 
     // Update position of item k
     void update(int k, const Vec2& new_center);
@@ -42,7 +43,7 @@ public:
 
     // Get candidate indices near a cell
     std::vector<Index> get_candidates_by_cell(int i, int j) const;
-    void get_candidates_by_cell(int i, int j, std::vector<Index>& out) const;
+    size_t get_candidates_by_cell(int i, int j, std::vector<Index>& out) const;
 
     // Get item indices in a cell
     std::vector<Index> get_items_in_cell(int i, int j) const;
@@ -92,7 +93,7 @@ public:
 private:
     int n_{20};          // Number of cells per dimension
     int N_{22};          // N = n + 2 (with padding)
-    int capacity_{8};    // Max items per cell
+    int capacity_{CAPACITY};    // Max items per cell
     float size_{1.04f};  // Cell size
     float center_{0.0f}; // Grid center
     //

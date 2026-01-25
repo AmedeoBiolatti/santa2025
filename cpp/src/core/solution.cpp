@@ -569,6 +569,7 @@ bool Solution::validate_cache(float tol, bool check_grid) const {
 
     if (check_grid) {
         std::vector<Index> candidates;
+        candidates.resize(NEIGHBOR_DELTAS.size() * static_cast<size_t>(grid_.capacity()));
         for (size_t i = 0; i < n; ++i) {
             if (!valid_[i]) continue;
             grid_.get_candidates(static_cast<int>(i), candidates);

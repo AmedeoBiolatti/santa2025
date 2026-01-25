@@ -142,7 +142,7 @@ std::any CellRuin::init_state(const SolutionEval& solution) {
     // For CellRuin specific scratch
     int N = solution.solution.grid().grid_N();
     state.eligible_cells.reserve(static_cast<size_t>(N * N));
-    state.cell_items.reserve(16);
+    state.cell_items.resize(static_cast<size_t>(solution.solution.grid().capacity()));
     return state;
 }
 

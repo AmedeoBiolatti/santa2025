@@ -10,7 +10,9 @@ namespace tree_packing {
 // Intersection constraint: penalizes overlapping trees
 class IntersectionConstraint {
 public:
-    IntersectionConstraint() = default;
+    IntersectionConstraint() {
+        init();
+    };
 
     // Full evaluation (compute sparse intersection map)
     [[nodiscard]] float eval(
@@ -40,8 +42,10 @@ public:
     ) const;
 
     [[nodiscard]] void init() {
-        candidates_.reserve(8 * 9);
-        candidates_.resize(8 * 9, -1);
+        size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(CAPACITY) * 2;
+        candidates_.reserve(needed);
+        candidates_.resize(needed);
+        std::fill(candidates_.begin(), candidates_.end(), static_cast<Index>(-1));
     }
 
 private:

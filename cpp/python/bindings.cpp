@@ -13,10 +13,11 @@ struct OptimizerState {
     std::any value;
 };
 
-py::array_t<float> make_array_view(const std::vector<float>& data, py::handle base) {
-    return py::array_t<float>(
+template <typename T>
+py::array_t<T> make_array_view(const std::vector<T>& data, py::handle base) {
+    return py::array_t<T>(
         {static_cast<py::ssize_t>(data.size())},
-        {static_cast<py::ssize_t>(sizeof(float))},
+        {static_cast<py::ssize_t>(sizeof(T))},
         data.data(),
         base
     );
@@ -44,6 +45,84 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("__repr__", [](const tree_packing::Vec2& v) {
             return "Vec2(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")";
         });
+
+    py::class_<tree_packing::AABB>(m, "AABB")
+        .def(py::init<>())
+        .def(py::init<const tree_packing::Vec2&, const tree_packing::Vec2&>())
+        .def_readwrite("min", &tree_packing::AABB::min)
+        .def_readwrite("max", &tree_packing::AABB::max)
+        .def("center", &tree_packing::AABB::center)
+        .def("size", &tree_packing::AABB::size)
+        .def("contains", &tree_packing::AABB::contains)
+        .def("intersects", &tree_packing::AABB::intersects);
+
+    py::class_<tree_packing::Grid2D>(m, "Grid2D")
+        .def(py::init<>())
+        .def_static("empty", &tree_packing::Grid2D::empty,
+            py::arg("num_items"),
+            py::arg("n") = 20,
+            py::arg("size") = 1.04f,
+            py::arg("capacity") = 16,
+            py::arg("center") = 0.0f)
+        .def_static("init", &tree_packing::Grid2D::init,
+            py::arg("centers"),
+            py::arg("n") = 16,
+            py::arg("capacity") = 8,
+            py::arg("size") = 1.04f,
+            py::arg("center") = 0.0f)
+        .def("grid_n", &tree_packing::Grid2D::grid_n)
+        .def("grid_N", &tree_packing::Grid2D::grid_N)
+        .def("capacity", &tree_packing::Grid2D::capacity)
+        .def("cell_size", &tree_packing::Grid2D::cell_size)
+        .def("center", &tree_packing::Grid2D::center)
+        .def("compute_ij", &tree_packing::Grid2D::compute_ij)
+        .def("get_item_cell", &tree_packing::Grid2D::get_item_cell)
+        .def("cell_bounds", &tree_packing::Grid2D::cell_bounds)
+        .def("cell_bounds_expanded", &tree_packing::Grid2D::cell_bounds_expanded)
+        .def("cell_count", &tree_packing::Grid2D::cell_count)
+        .def("get_candidates", [](const tree_packing::Grid2D& self, int k) {
+            return self.get_candidates(k);
+        })
+        .def("get_candidates_by_pos", [](const tree_packing::Grid2D& self, const tree_packing::Vec2& pos) {
+            return self.get_candidates_by_pos(pos);
+        })
+        .def("get_candidates_by_cell", [](const tree_packing::Grid2D& self, int i, int j) {
+            return self.get_candidates_by_cell(i, j);
+        })
+        .def("get_items_in_cell", [](const tree_packing::Grid2D& self, int i, int j) {
+            return self.get_items_in_cell(i, j);
+        })
+        .def("non_empty_cells", [](const tree_packing::Grid2D& self) {
+            return py::cast(self.non_empty_cells());
+        })
+        .def_property_readonly("i2n", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.i2n(), py::cast(&self));
+        })
+        .def_property_readonly("j2n", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.j2n(), py::cast(&self));
+        })
+        .def_property_readonly("ij2k", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.ij2k(), py::cast(&self));
+        })
+        .def_property_readonly("ij2n", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.ij2n(), py::cast(&self));
+        })
+        .def_property_readonly("k2ij", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.k2ij(), py::cast(&self));
+        })
+        .def_property_readonly("cell_to_non_empty_idx", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.cell_to_non_empty_idx(), py::cast(&self));
+        })
+        .def_property_readonly("cell_bounds_data", [](const tree_packing::Grid2D& self) {
+            return py::cast(self.cell_bounds_list());
+        })
+        .def_property_readonly("cell_bounds_expanded_data", [](const tree_packing::Grid2D& self) {
+            return py::cast(self.cell_bounds_expanded_list());
+        })
+        .def_property_readonly("min_i", &tree_packing::Grid2D::min_i)
+        .def_property_readonly("max_i", &tree_packing::Grid2D::max_i)
+        .def_property_readonly("min_j", &tree_packing::Grid2D::min_j)
+        .def_property_readonly("max_j", &tree_packing::Grid2D::max_j);
 
     // TreeParams
     py::class_<tree_packing::TreeParams>(m, "TreeParams")
@@ -149,6 +228,9 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("set_params", &tree_packing::Solution::set_params)
         .def("set_nan", &tree_packing::Solution::set_nan)
         .def("recompute_cache", &tree_packing::Solution::recompute_cache)
+        .def("grid", [](const tree_packing::Solution& self) -> const tree_packing::Grid2D& {
+            return self.grid();
+        }, py::return_value_policy::reference_internal)
         .def("centers", [](const tree_packing::Solution& self) {
             py::ssize_t n = static_cast<py::ssize_t>(self.centers().size());
             py::array_t<float> arr({n, static_cast<py::ssize_t>(2)});

@@ -7,23 +7,18 @@
 
 namespace tree_packing {
 namespace {
-struct IntersectionScratch {
-    std::vector<Index> candidates;
-    std::vector<int> seen;
-    std::vector<char> is_modified;
-};
-
-IntersectionScratch& scratch() {
-    static thread_local IntersectionScratch s;
-    return s;
-}
-
 
 SolutionEval::IntersectionList& ensure_unique_row(
     SolutionEval::IntersectionMap& map,
     size_t idx
 ) {
+    if (idx >= map.size()) {
+        map.resize(idx + 1);
+    }
     auto& row_ptr = map[idx];
+    if (!row_ptr) {
+        row_ptr = std::make_shared<SolutionEval::IntersectionList>();
+    }
     return *row_ptr;
 }
 
@@ -58,50 +53,6 @@ void add_pair(
 }
 
 }  // namespace
-
-float IntersectionConstraint::compute_pair_score(
-    const Figure& f0,
-    const Figure& f1,
-    const Vec2& c0,
-    const Vec2& c1
-) const {
-    // Quick distance check using bounding spheres
-    Vec2 diff = c0 - c1;
-    float dist2 = diff.length_squared();
-
-    // If centers are too far apart, skip detailed check
-    if (dist2 >= THR2) {
-        return 0.0f;
-    }
-
-    return figure_intersection_score(f0, f1, EPSILON);
-}
-
-float IntersectionConstraint::compute_pair_score_from_normals(
-    const Figure& f0,
-    const Figure& f1,
-    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
-    const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n1,
-    const AABB& aabb0,
-    const AABB& aabb1,
-    const Vec2& c0,
-    const Vec2& c1
-) const {
-    if (aabb0.max.x < aabb1.min.x || aabb1.max.x < aabb0.min.x ||
-        aabb0.max.y < aabb1.min.y || aabb1.max.y < aabb0.min.y) {
-        return 0.0f;
-    }
-
-    Vec2 diff = c0 - c1;
-    float dist2 = diff.length_squared();
-
-    if (dist2 >= THR2) {
-        return 0.0f;
-    }
-
-    return figure_intersection_score_from_normals(f0, f1, n0, n1, EPSILON);
-}
-
 float IntersectionConstraint::compute_pair_score_from_normals_per_triangle(
     const Figure& f0,
     const Figure& f1,
@@ -203,60 +154,39 @@ float IntersectionConstraint::eval(
     float total_violation = 0.0f;
     int count = 0;
 
-    auto& work = scratch();
-    auto& candidates = work.candidates;
-    auto& seen = work.seen;
-    candidates.reserve(static_cast<size_t>(reserve_size));
-    if (seen.size() != n) {
-        seen.assign(n, -1);
-    } else {
-        std::fill(seen.begin(), seen.end(), -1);
-    }
-    int stamp = 0;
-
     for (size_t i = 0; i < n; ++i) {
         if (!solution.is_valid(i)) continue;
 
-        ++stamp;
         int i_idx = static_cast<int>(i);
         auto [ci, cj] = grid.get_item_cell(i_idx);
-        const AABB& aabb_i = aabbs[i];
 
-        for (const auto& [di, dj] : NEIGHBOR_DELTAS) {
-            int ni = ci + di;
-            int nj = cj + dj;
-            if (di != 0 || dj != 0) {
-                if (!aabb_i.intersects(grid.cell_bounds_expanded(ni, nj))) {
-                    continue;
-                }
-            }
-            grid.get_items_in_cell(ni, nj, candidates);
-            for (Index c : candidates) {
-                if (c < 0) continue;
-                int c_idx = static_cast<int>(c);
-                if (static_cast<size_t>(c_idx) <= i) continue;
-                if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
-                if (seen[c_idx] == stamp) continue;
-                seen[c_idx] = stamp;
+        size_t n_candidates = grid.get_candidates_by_cell(ci, cj, candidates_);
+        size_t t = 0;
+        for (Index c : candidates_) {
+            if ((t++) >= n_candidates) break;
+            if (c < 0) continue;
+            int c_idx = static_cast<int>(c);
+            if (static_cast<size_t>(c_idx) <= i) continue;
+            if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
 
-                float score = compute_pair_score_from_normals_per_triangle(
-                    figures[i],
-                    figures[c_idx],
-                    normals[i],
-                    normals[c_idx],
-                    tri_aabbs[i],
-                    tri_aabbs[c_idx],
-                    aabbs[i],
-                    aabbs[c_idx],
-                    centers[i],
-                    centers[c_idx]
-                );
-                if (score <= 0.0f) continue;
-                add_pair(map, i, static_cast<size_t>(c_idx), score);
-                total_violation += 2.0f * score;  // Count both directions
-                count += 2;
-            }
+            float score = compute_pair_score_from_normals_per_triangle(
+                figures[i],
+                figures[c_idx],
+                normals[i],
+                normals[c_idx],
+                tri_aabbs[i],
+                tri_aabbs[c_idx],
+                aabbs[i],
+                aabbs[c_idx],
+                centers[i],
+                centers[c_idx]
+            );
+            if (score <= 0.0f) continue;
+            add_pair(map, i, static_cast<size_t>(c_idx), score);
+            total_violation += 2.0f * score;  // Count both directions
+            count += 2;
         }
+
     }
 
     if (out_count) {
@@ -283,11 +213,10 @@ float IntersectionConstraint::eval_update(
 
     float total = prev_total;
     int count = prev_count;
-    int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * new_grid.capacity();
     modified_.clear();
-    candidates_.clear();
 
     // Remove old values for modified indices
+    int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * new_grid.capacity();
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
         modified_.insert(idx);
@@ -309,38 +238,33 @@ float IntersectionConstraint::eval_update(
         if (!solution.is_valid(static_cast<size_t>(idx))) continue;
 
         auto [ci, cj] = new_grid.get_item_cell(idx);
-        const AABB& aabb_i = aabbs[idx];
 
-        for (const auto& [di, dj] : NEIGHBOR_DELTAS) {
-            int ni = ci + di;
-            int nj = cj + dj;
+        size_t n_candidates = new_grid.get_candidates_by_cell(ci, cj, candidates_);
+        size_t i = 0;
+        for (Index c : candidates_) {
+            if ((i++) >= n_candidates) break;
+            if (c < 0) continue;
+            int c_idx = static_cast<int>(c);
+            if (c_idx == idx) continue;
+            if (c_idx > idx && modified_.contains(c_idx)) continue;
 
-            new_grid.get_items_in_cell(ni, nj, candidates_);
-            for (Index c : candidates_) {
-                if (c < 0) continue;
-                int c_idx = static_cast<int>(c);
-                if (c_idx == idx) continue;
-                if (c_idx > idx && modified_.contains(c_idx)) continue;
-
-                float score = compute_pair_score_from_normals_per_triangle(
-                    figures[idx],
-                    figures[c_idx],
-                    normals[idx],
-                    normals[c_idx],
-                    tri_aabbs[idx],
-                    tri_aabbs[c_idx],
-                    aabbs[idx],
-                    aabbs[c_idx],
-                    centers[idx],
-                    centers[c_idx]
-                );
-                if (score <= 0.0f) continue;
-                add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
-                total += 2.0f * score;
-                count += 2;
-            }
+            float score = compute_pair_score_from_normals_per_triangle(
+                figures[idx],
+                figures[c_idx],
+                normals[idx],
+                normals[c_idx],
+                tri_aabbs[idx],
+                tri_aabbs[c_idx],
+                aabbs[idx],
+                aabbs[c_idx],
+                centers[idx],
+                centers[c_idx]
+            );
+            if (score <= 0.0f) continue;
+            add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
+            total += 2.0f * score;
+            count += 2;
         }
-
     }
 
     if (count < 0) {

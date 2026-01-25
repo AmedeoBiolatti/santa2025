@@ -206,6 +206,8 @@ void Grid2D::remove(int k) {
 
 std::vector<Index> Grid2D::get_candidates(int k) const {
     std::vector<Index> candidates;
+    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(capacity_);
+    candidates.resize(needed);
     get_candidates(k, candidates);
     return candidates;
 }
@@ -218,6 +220,8 @@ void Grid2D::get_candidates(int k, std::vector<Index>& out) const {
 
 std::vector<Index> Grid2D::get_candidates_by_pos(const Vec2& pos) const {
     std::vector<Index> candidates;
+    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(capacity_);
+    candidates.resize(needed);
     get_candidates_by_pos(pos, candidates);
     return candidates;
 }
@@ -229,16 +233,20 @@ void Grid2D::get_candidates_by_pos(const Vec2& pos, std::vector<Index>& out) con
 
 std::vector<Index> Grid2D::get_candidates_by_cell(int i, int j) const {
     std::vector<Index> candidates;
+    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(capacity_);
+    candidates.resize(needed);
     get_candidates_by_cell(i, j, candidates);
     return candidates;
 }
 
-void Grid2D::get_candidates_by_cell(int i, int j, std::vector<Index>& out) const {
+size_t Grid2D::get_candidates_by_cell(int i, int j, std::vector<Index>& out) const {
+#ifndef NDEBUG
     size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(capacity_);
     if (out.size() != needed) {
         out.resize(needed);
     }
     std::fill(out.begin(), out.end(), static_cast<Index>(-1));
+#endif
     size_t out_idx = 0;
     // Check all 9 neighboring cells
     for (const auto& [di, dj] : NEIGHBOR_DELTAS) {
@@ -251,13 +259,16 @@ void Grid2D::get_candidates_by_cell(int i, int j, std::vector<Index>& out) const
         int base = cell_index(ni, nj);
         for (int s = 0; s < capacity_; ++s) {
             int item = ij2k_[base + s];
-            out[out_idx++] = static_cast<Index>(item);
+            out[static_cast<size_t>(out_idx)] = static_cast<Index>(item);
+            out_idx += (item >= 0) ? 1 : 0;
         }
     }
+    return out_idx;
 }
 
 std::vector<Index> Grid2D::get_items_in_cell(int i, int j) const {
     std::vector<Index> items;
+    items.resize(static_cast<size_t>(capacity_));
     get_items_in_cell(i, j, items);
     return items;
 }
