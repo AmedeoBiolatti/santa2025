@@ -126,21 +126,6 @@ void ALNS::apply(
     }
 }
 
-void ALNS::rollback(SolutionEval& solution, std::any& state) {
-    auto* alns_state = std::any_cast<ALNSState>(&state);
-    if (!alns_state) {
-        return;
-    }
-    int recreate_idx = alns_state->last_recreate_idx;
-    if (recreate_idx >= 0 && recreate_idx < static_cast<int>(recreate_operators_.size())) {
-        recreate_operators_[recreate_idx]->rollback(solution, alns_state->recreate_states[recreate_idx]);
-    }
-    int ruin_idx = alns_state->last_ruin_idx;
-    if (ruin_idx >= 0 && ruin_idx < static_cast<int>(ruin_operators_.size())) {
-        ruin_operators_[ruin_idx]->rollback(solution, alns_state->ruin_states[ruin_idx]);
-    }
-}
-
 OptimizerPtr ALNS::clone() const {
     std::vector<OptimizerPtr> ruin_clones;
     std::vector<OptimizerPtr> recreate_clones;

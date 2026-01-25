@@ -3,8 +3,66 @@
 #include <algorithm>
 #include <iostream>
 #include <utility>
+#include <cassert>
 
 namespace tree_packing {
+
+#ifndef NDEBUG
+// Debug helper to compare solution params
+static bool solutions_match(const Solution& a, const Solution& b, float tol = 1e-6f) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a.is_valid(i) != b.is_valid(i)) return false;
+        if (a.is_valid(i)) {
+            TreeParams pa = a.get_params(i);
+            TreeParams pb = b.get_params(i);
+            if (std::abs(pa.pos.x - pb.pos.x) > tol ||
+                std::abs(pa.pos.y - pb.pos.y) > tol ||
+                std::abs(pa.angle - pb.angle) > tol) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Debug struct to save full state for validation
+struct DebugSavedState {
+    Solution solution;
+    float intersection_violation{0.0f};
+    float bounds_violation{0.0f};
+    float objective{0.0f};
+    int intersection_count{0};
+
+    void save_from(const SolutionEval& eval) {
+        solution.copy_from(eval.solution);
+        intersection_violation = eval.intersection_violation;
+        bounds_violation = eval.bounds_violation;
+        objective = eval.objective;
+        intersection_count = eval.intersection_count;
+    }
+
+    bool compare_scores(const SolutionEval& eval, float tol = 1e-4f) const {
+        if (std::abs(intersection_violation - eval.intersection_violation) > tol) {
+            std::cerr << "[SA DEBUG] intersection_violation mismatch: "
+                      << intersection_violation << " vs " << eval.intersection_violation
+                      << " (diff=" << std::abs(intersection_violation - eval.intersection_violation) << ")\n";
+            return false;
+        }
+        if (std::abs(bounds_violation - eval.bounds_violation) > tol) {
+            std::cerr << "[SA DEBUG] bounds_violation mismatch: "
+                      << bounds_violation << " vs " << eval.bounds_violation << "\n";
+            return false;
+        }
+        if (std::abs(objective - eval.objective) > tol) {
+            std::cerr << "[SA DEBUG] objective mismatch: "
+                      << objective << " vs " << eval.objective << "\n";
+            return false;
+        }
+        return true;
+    }
+};
+#endif
 
 SimulatedAnnealing::SimulatedAnnealing(
     OptimizerPtr inner_optimizer,
@@ -31,13 +89,7 @@ void SimulatedAnnealing::set_problem(Problem* problem) {
 
 std::any SimulatedAnnealing::init_state(const SolutionEval& solution) {
     SAState state;
-    state.iteration = 0;
-    state.counter = 0;
-    state.temperature = initial_temp_;
     state.inner_state = inner_optimizer_->init_state(solution);
-    state.n_accepted = 0;
-    state.n_rejected = 0;
-    state.last_accept = false;
     return state;
 }
 
@@ -61,6 +113,13 @@ float SimulatedAnnealing::compute_temperature(int iteration) const {
     return std::max(temp, min_temp_);
 }
 
+inline float fast_exp(float x) {
+      // Schraudolph's approximation
+      union { float f; int32_t i; } u;
+      u.i = (int32_t)(12102203.0f * x + 1064866805.0f);
+      return u.f;
+  }
+
 void SimulatedAnnealing::apply(
     SolutionEval& solution,
     std::any& state,
@@ -76,6 +135,14 @@ void SimulatedAnnealing::apply(
     // Compute current score before mutation
     float current_score = problem_->score(solution, global_state);
 
+#ifndef NDEBUG
+    // Save debug copy of full state before mutation
+    thread_local DebugSavedState debug_state;
+    debug_state.save_from(solution);
+#endif
+    // Mark checkpoint before applying inner optimizer
+    size_t checkpoint = global_state.mark_checkpoint();
+
     // Apply inner optimizer
     RNG inner_rng = rng.split();
     inner_optimizer_->apply(
@@ -86,52 +153,84 @@ void SimulatedAnnealing::apply(
     float candidate_score = problem_->score(solution, global_state);
     float delta = candidate_score - current_score;
 
-    int iteration = sa_state->iteration;
-    int counter = sa_state->counter;
     if (patience_ >= 0) {
         if (global_state.iters_since_improvement() <= 1) {
-            counter = 0;
+            counter_ = 0;
         }
-        if (counter > patience_) {
-            iteration = 0;
-            counter = 0;
+        if (counter_ > patience_) {
+            iteration_ = 0;
+            counter_ = 0;
         }
     }
 
-    float temperature = compute_temperature(iteration);
-    float accept_prob = std::min(std::exp(-delta / temperature), 1.0f);
-    bool accept = rng.uniform() < accept_prob;
-
-    if (accept) {
-        sa_state->n_accepted++;
+    bool accept;
+    float temperature, accept_prob;
+    if (delta <= 0.0f) {
+        accept = true;
+        temperature = -1.0f;
+        accept_prob = 1.0f;
+        ++n_accepted_;
     } else {
-        inner_optimizer_->rollback(solution, sa_state->inner_state);
-        sa_state->n_rejected++;
+        temperature = compute_temperature(iteration_);
+        accept_prob = std::min(fast_exp(-delta / temperature), 1.0f);
+        accept = rng.uniform() < accept_prob;
+        if (!accept) {
+            // Rollback using checkpoint
+            global_state.rollback_to(*problem_, solution, checkpoint);
+#ifndef NDEBUG
+            // Verify solution params match after rollback
+            if (!solutions_match(debug_state.solution, solution.solution)) {
+                std::cerr << "[SimulatedAnnealing] ERROR: Solution params not restored after rollback!\n";
+                for (size_t i = 0; i < debug_state.solution.size(); ++i) {
+                    if (debug_state.solution.is_valid(i) != solution.solution.is_valid(i)) {
+                        std::cerr << "  idx=" << i << " valid mismatch\n";
+                    } else if (debug_state.solution.is_valid(i)) {
+                        TreeParams pa = debug_state.solution.get_params(i);
+                        TreeParams pb = solution.solution.get_params(i);
+                        if (std::abs(pa.pos.x - pb.pos.x) > 1e-6f ||
+                            std::abs(pa.pos.y - pb.pos.y) > 1e-6f ||
+                            std::abs(pa.angle - pb.angle) > 1e-6f) {
+                            std::cerr << "  idx=" << i << " params: ("
+                                << pa.pos.x << "," << pa.pos.y << "," << pa.angle << ") vs ("
+                                << pb.pos.x << "," << pb.pos.y << "," << pb.angle << ")\n";
+                        }
+                    }
+                }
+                assert(false && "Solution params not restored after rollback");
+            }
+            // Verify cache is consistent with params
+            if (!solution.solution.validate_cache(1e-5f, false)) {
+                std::cerr << "[SimulatedAnnealing] ERROR: Cache invalid after rollback!\n";
+                assert(false && "Cache invalid after rollback");
+            }
+            // Verify scores match
+            if (!debug_state.compare_scores(solution)) {
+                std::cerr << "[SimulatedAnnealing] ERROR: Scores don't match after rollback!\n";
+                std::cerr << "  saved intersection_violation=" << debug_state.intersection_violation
+                          << ", current=" << solution.intersection_violation << "\n";
+                std::cerr << "  saved bounds_violation=" << debug_state.bounds_violation
+                          << ", current=" << solution.bounds_violation << "\n";
+                std::cerr << "  saved objective=" << debug_state.objective
+                          << ", current=" << solution.objective << "\n";
+                assert(false && "Scores don't match after rollback");
+            }
+#endif
+            ++n_rejected_;
+        } else {
+            ++n_accepted_;
+        }
     }
-    sa_state->last_accept = accept;
+    last_accept_ = accept;
+    last_checkpoint_ = checkpoint;
 
     // Update state
-    sa_state->iteration = iteration + 1;
-    sa_state->counter = counter + 1;
-    sa_state->temperature = temperature;
-
+    ++iteration_;
+    ++counter_;
     if (verbose_) {
-        int total = sa_state->n_accepted + sa_state->n_rejected;
-        float rate = (total > 0) ? static_cast<float>(sa_state->n_accepted) / total : 0.0f;
+        float rate = ((float) n_accepted_) / ((float) n_accepted_ + n_rejected_);
         std::cout << "[SimulatedAnnealing] temp=" << temperature << " acc-rate=" << rate;
         std::cout << " | score: " << current_score << "->" << candidate_score << " prob=" << accept_prob;
         std::cout << (accept ? "👍" : "👎") << "\n";
-    }
-}
-
-void SimulatedAnnealing::rollback(SolutionEval& solution, std::any& state) {
-    auto* sa_state = std::any_cast<SAState>(&state);
-    if (!sa_state) {
-        return;
-    }
-    if (sa_state->last_accept) {
-        inner_optimizer_->rollback(solution, sa_state->inner_state);
-        sa_state->last_accept = false;
     }
 }
 

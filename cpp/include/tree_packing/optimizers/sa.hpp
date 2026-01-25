@@ -8,13 +8,7 @@ namespace tree_packing {
 
 // State for Simulated Annealing
 struct SAState {
-    int iteration{0};
-    int counter{0};
-    float temperature{1.0f};
     std::any inner_state;
-    int n_accepted{0};
-    int n_rejected{0};
-    bool last_accept{false};
 };
 
 // Cooling schedule type
@@ -48,8 +42,6 @@ public:
         RNG& rng
     ) override;
 
-    void rollback(SolutionEval& solution, std::any& state) override;
-
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
@@ -60,6 +52,13 @@ private:
     float cooling_rate_;
     int patience_;
     bool verbose_;
+
+    int iteration_ = 0;
+    int counter_ = 0;
+    bool last_accept_ = false;
+    size_t last_checkpoint_ = 0;
+    size_t n_accepted_ = 0;
+    size_t n_rejected_ = 0;
 
     // Compute temperature based on iteration
     float compute_temperature(int iteration) const;

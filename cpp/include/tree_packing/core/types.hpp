@@ -229,6 +229,12 @@ struct TreeParamsSoA {
         angle.clear();
     }
 
+    void push_back(const TreeParams& params) {
+        x.push_back(params.pos.x);
+        y.push_back(params.pos.y);
+        angle.push_back(params.angle);
+    }
+
     [[nodiscard]] TreeParams get(size_t i) const {
         return TreeParams{x[i], y[i], angle[i]};
     }

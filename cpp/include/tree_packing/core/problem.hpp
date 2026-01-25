@@ -47,7 +47,16 @@ public:
     ) const;
 
     // Compute score (objective + penalty * violations + missing penalty)
-    [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const;
+    [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
+        float mu = global_state.mu();
+
+        float violation = solution_eval.total_violation();
+        int n_missing = solution_eval.n_missing();
+        float reg = solution_eval.reg();
+
+        float score = solution_eval.objective + mu * violation + 1.0f * static_cast<float>(n_missing) + 1e-6 * reg;
+        return score;
+    }
 
     // Objective function (bounding box area / num_trees)
     [[nodiscard]] float objective(const Solution& solution) const;

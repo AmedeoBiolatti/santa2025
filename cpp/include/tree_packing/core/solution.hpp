@@ -50,7 +50,6 @@ public:
     [[nodiscard]] float max_abs(size_t i) const { return max_abs_[i]; }
     [[nodiscard]] float max_max_abs() const { return max_max_abs_; }
     [[nodiscard]] size_t max_max_abs_idx() const { return max_max_abs_idx_; }
-    [[nodiscard]] uint64_t revision() const { return revision_; }
     [[nodiscard]] const Grid2D& grid() const { return grid_; }
     [[nodiscard]] bool is_valid(size_t i) const { return valid_[i]; }
 
@@ -84,7 +83,6 @@ public:
 
 protected:
     friend class Problem;
-    static std::atomic<uint64_t> next_revision_;
     TreeParamsSoA params_;
     std::vector<Figure> figures_;
     std::vector<Vec2> centers_;
@@ -99,7 +97,6 @@ protected:
     std::vector<int> removed_indices_;  // Tracks invalid tree indices (order doesn't matter)
     int missing_count_{0};
     Grid2D grid_;
-    uint64_t revision_{0};
 
     void update_cache_for(size_t i);
     void update_cache_for(size_t i, bool new_valid);
@@ -139,7 +136,6 @@ struct SolutionEval {
     Index max_x_idx{-1};
     Index min_y_idx{-1};
     Index max_y_idx{-1};
-    mutable uint64_t score_cache_revision{std::numeric_limits<uint64_t>::max()};
     mutable float score_cache_mu{std::numeric_limits<float>::quiet_NaN()};
     mutable float score_cache_value{0.0f};
     mutable bool score_cache_valid{false};

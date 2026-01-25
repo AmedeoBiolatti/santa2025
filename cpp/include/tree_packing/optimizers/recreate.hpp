@@ -24,8 +24,6 @@ public:
         RNG& rng
     ) override;
 
-    void rollback(SolutionEval& solution, std::any& state) override;
-
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
@@ -56,8 +54,6 @@ public:
         RNG& rng
     ) override;
 
-    void rollback(SolutionEval& solution, std::any& state) override;
-
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
@@ -69,31 +65,19 @@ private:
     bool verbose_;
 };
 
-// State for RandomRecreate
+// State for RandomRecreate (simplified - rollback now uses UpdateStack)
 struct RandomRecreateState {
     int iteration{0};
     std::vector<int> indices;
-    std::vector<TreeParams> prev_params;
-    std::vector<char> prev_valid;
-    // Scratch buffers (reused across calls)
     TreeParamsSoA new_params;
-    std::vector<int> valid_indices;
-    std::vector<int> invalid_indices;
-    TreeParamsSoA valid_params;
 };
 
-// State for GridCellRecreate
+// State for GridCellRecreate (simplified - rollback now uses UpdateStack)
 struct GridCellRecreateState {
     int iteration{0};
     std::vector<int> indices;
-    std::vector<TreeParams> prev_params;
-    std::vector<char> prev_valid;
-    // Scratch buffers (reused across calls)
     std::vector<std::pair<int, int>> candidate_cells;
     TreeParamsSoA new_params;
-    std::vector<int> valid_indices;
-    std::vector<int> invalid_indices;
-    TreeParamsSoA valid_params;
 };
 
 }  // namespace tree_packing

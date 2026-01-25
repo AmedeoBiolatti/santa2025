@@ -270,9 +270,20 @@ float IntersectionConstraint::eval_update(
     if (count < 0) {
         count = 0;
     }
-    if (count == 0) {
-        total = 0.0f;
+
+#ifndef NDEBUG
+    // Recompute total from map to avoid floating point drift
+    // The incremental total accumulation (prev_total - old + new) can drift
+    // from the true sum due to floating point arithmetic order dependence.
+    total = 0.0f;
+    for (size_t i = 0; i < map.size(); ++i) {
+        if (!map[i]) continue;
+        for (const auto& entry : *map[i]) {
+            total += entry.score;  // Each pair is stored twice, so just sum all
+        }
     }
+#endif
+
     if (out_count) {
         *out_count = count;
     }
@@ -313,9 +324,18 @@ float IntersectionConstraint::eval_remove(
     if (count < 0) {
         count = 0;
     }
-    if (count == 0) {
-        total = 0.0f;
+
+#ifndef NDEBUG
+    // Recompute total from map to avoid floating point drift
+    total = 0.0f;
+    for (size_t i = 0; i < map.size(); ++i) {
+        if (!map[i]) continue;
+        for (const auto& entry : *map[i]) {
+            total += entry.score;
+        }
     }
+#endif
+
     if (out_count) {
         *out_count = count;
     }

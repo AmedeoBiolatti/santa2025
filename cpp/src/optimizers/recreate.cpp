@@ -21,14 +21,8 @@ std::any RandomRecreate::init_state(const SolutionEval& solution) {
     (void)solution;
     RandomRecreateState state;
     state.iteration = 0;
-    // Reserve for typical case (<=4 updates)
     state.indices.reserve(8);
-    state.prev_params.reserve(8);
-    state.prev_valid.reserve(8);
     state.new_params.reserve(8);
-    state.valid_indices.reserve(8);
-    state.invalid_indices.reserve(8);
-    state.valid_params.reserve(8);
     return state;
 }
 
@@ -38,8 +32,6 @@ void RandomRecreate::apply(
     GlobalState& global_state,
     RNG& rng
 ) {
-    (void)global_state;
-    const auto& params = solution.solution.params();
     float max_abs = solution.solution.max_max_abs();
 
     auto* rec_state = std::any_cast<RandomRecreateState>(&state);
@@ -70,20 +62,7 @@ void RandomRecreate::apply(
     auto& indices = rec_state->indices;
     indices.assign(removed.begin(), removed.begin() + n_recreate);
 
-    rec_state->prev_params.resize(indices.size());
-    rec_state->prev_valid.assign(indices.size(), 0);
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (idx < 0 || static_cast<size_t>(idx) >= params.size()) {
-            continue;
-        }
-        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
-            rec_state->prev_params[k] = solution.solution.get_params(static_cast<size_t>(idx));
-            rec_state->prev_valid[k] = 1;
-        }
-    }
-
-    // Create new solution with updated params
+    // Create new params
     auto& new_params = rec_state->new_params;
     new_params.resize(static_cast<size_t>(n_recreate));
     for (int i = 0; i < n_recreate; ++i) {
@@ -93,6 +72,12 @@ void RandomRecreate::apply(
             rng.uniform(-PI, PI)
         };
         new_params.set(static_cast<size_t>(i), p);
+    }
+
+    // Push insertions to update stack for rollback support
+    auto& stack = global_state.update_stack();
+    for (int idx : indices) {
+        stack.push_insert(idx);
     }
 
     // Evaluate the new solution
@@ -105,40 +90,6 @@ void RandomRecreate::apply(
         std::cout << "[RandomRecreate] iter=" << rec_state->iteration
                   << " removed=" << solution.solution.removed_indices().size()
                   << " recreated=" << n_recreate << "\n";
-    }
-}
-
-void RandomRecreate::rollback(SolutionEval& solution, std::any& state) {
-    auto* rec_state = std::any_cast<RandomRecreateState>(&state);
-    if (!rec_state) {
-        return;
-    }
-    const auto& indices = rec_state->indices;
-    if (indices.empty()) {
-        return;
-    }
-    auto& valid_indices = rec_state->valid_indices;
-    auto& invalid_indices = rec_state->invalid_indices;
-    auto& valid_params = rec_state->valid_params;
-    valid_indices.clear();
-    invalid_indices.clear();
-    valid_params.clear();
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (!rec_state->prev_valid[k]) {
-            invalid_indices.push_back(idx);
-        } else {
-            size_t out_idx = valid_indices.size();
-            valid_indices.push_back(idx);
-            valid_params.resize(valid_indices.size());
-            valid_params.set(out_idx, rec_state->prev_params[k]);
-        }
-    }
-    if (!invalid_indices.empty()) {
-        problem_->remove_and_eval(solution, invalid_indices);
-    }
-    if (!valid_indices.empty()) {
-        problem_->update_and_eval(solution, valid_indices, valid_params);
     }
 }
 
@@ -169,15 +120,8 @@ GridCellRecreate::GridCellRecreate(
 std::any GridCellRecreate::init_state(const SolutionEval& solution) {
     GridCellRecreateState state;
     state.iteration = 0;
-    // Reserve for typical case (<=4 updates)
     state.indices.reserve(8);
-    state.prev_params.reserve(8);
-    state.prev_valid.reserve(8);
     state.new_params.reserve(8);
-    state.valid_indices.reserve(8);
-    state.invalid_indices.reserve(8);
-    state.valid_params.reserve(8);
-    // For GridCellRecreate specific scratch
     int N = solution.solution.grid().grid_N();
     state.candidate_cells.reserve(static_cast<size_t>(N * N));
     return state;
@@ -186,7 +130,7 @@ std::any GridCellRecreate::init_state(const SolutionEval& solution) {
 void GridCellRecreate::apply(
     SolutionEval& solution,
     std::any& state,
-    GlobalState&,
+    GlobalState& global_state,
     RNG& rng
 ) {
     auto* rec_state = std::any_cast<GridCellRecreateState>(&state);
@@ -237,19 +181,6 @@ void GridCellRecreate::apply(
     auto& indices = rec_state->indices;
     indices.assign(removed.begin(), removed.begin() + n_recreate);
 
-    rec_state->prev_params.resize(indices.size());
-    rec_state->prev_valid.assign(indices.size(), 0);
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (idx < 0 || static_cast<size_t>(idx) >= solution.solution.size()) {
-            continue;
-        }
-        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
-            rec_state->prev_params[k] = solution.solution.get_params(static_cast<size_t>(idx));
-            rec_state->prev_valid[k] = 1;
-        }
-    }
-
     auto& new_params = rec_state->new_params;
     new_params.resize(static_cast<size_t>(n_recreate));
     for (int k = 0; k < n_recreate; ++k) {
@@ -264,6 +195,12 @@ void GridCellRecreate::apply(
         new_params.set(static_cast<size_t>(k), p);
     }
 
+    // Push insertions to update stack for rollback support
+    auto& stack = global_state.update_stack();
+    for (int idx : indices) {
+        stack.push_insert(idx);
+    }
+
     problem_->insert_and_eval(solution, indices, new_params);
 
     rec_state->iteration++;
@@ -273,40 +210,6 @@ void GridCellRecreate::apply(
                   << " removed=" << solution.solution.removed_indices().size()
                   << " recreated=" << n_recreate
                   << " cells=" << candidate_cells.size() << "\n";
-    }
-}
-
-void GridCellRecreate::rollback(SolutionEval& solution, std::any& state) {
-    auto* rec_state = std::any_cast<GridCellRecreateState>(&state);
-    if (!rec_state) {
-        return;
-    }
-    const auto& indices = rec_state->indices;
-    if (indices.empty()) {
-        return;
-    }
-    auto& valid_indices = rec_state->valid_indices;
-    auto& invalid_indices = rec_state->invalid_indices;
-    auto& valid_params = rec_state->valid_params;
-    valid_indices.clear();
-    invalid_indices.clear();
-    valid_params.clear();
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (!rec_state->prev_valid[k]) {
-            invalid_indices.push_back(idx);
-        } else {
-            size_t out_idx = valid_indices.size();
-            valid_indices.push_back(idx);
-            valid_params.resize(valid_indices.size());
-            valid_params.set(out_idx, rec_state->prev_params[k]);
-        }
-    }
-    if (!invalid_indices.empty()) {
-        problem_->remove_and_eval(solution, invalid_indices);
-    }
-    if (!valid_indices.empty()) {
-        problem_->update_and_eval(solution, valid_indices, valid_params);
     }
 }
 

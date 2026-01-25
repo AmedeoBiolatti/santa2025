@@ -180,7 +180,6 @@ void Problem::update_and_eval(
 ) const {
     size_t n = indices.size();
 #ifndef NDEBUG
-
     if (new_params.size() != n) {
         throw std::runtime_error("update_and_eval: indices and new_params size mismatch");
     }
@@ -213,7 +212,6 @@ void Problem::update_and_eval(
         int idx = indices[k];
         size_t i = static_cast<size_t>(idx);
         TreeParams p = new_params.get(k);
-
 
         eval.solution.params_.x[i] = p.pos.x;
         eval.solution.params_.y[i] = p.pos.y;
@@ -315,7 +313,6 @@ void Problem::update_and_eval(
         eval.intersection_count,
         &eval.intersection_count
     );
-    eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Problem::insert_and_eval(
@@ -337,12 +334,6 @@ void Problem::insert_and_eval(
         assert(std::isfinite(p.pos.x) && std::isfinite(p.pos.y) && std::isfinite(p.angle));
     }
 #endif
-
-    if (n == 0) {
-        eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
-        return;
-    }
-
     for (size_t k = 0; k < n; ++k) {
         size_t i = static_cast<size_t>(indices[k]);
         TreeParams p = new_params.get(k);
@@ -395,7 +386,6 @@ void Problem::insert_and_eval(
         eval.intersection_count,
         &eval.intersection_count
     );
-    eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Problem::remove_and_eval(
@@ -443,18 +433,22 @@ void Problem::remove_and_eval(
         if (recompute_min_x) {
             auto [min_x, k] = eval.solution.grid_.get_min_x(aabbs);
             eval.min_x = min_x;
+            eval.min_x_idx = k;
         }
         if (recompute_max_x) {
             auto [max_x, k] = eval.solution.grid_.get_max_x(aabbs);
             eval.max_x = max_x;
+            eval.max_x_idx = k;
         }
         if (recompute_min_y) {
             auto [min_y, k] = eval.solution.grid_.get_min_y(aabbs);
             eval.min_y = min_y;
+            eval.min_y_idx = k;
         }
         if (recompute_max_y) {
             auto [max_y, k] = eval.solution.grid_.get_max_y(aabbs);
             eval.max_y = max_y;
+            eval.max_y_idx = k;
         }
     }
     if (recompute_max_abs) {
@@ -497,31 +491,6 @@ void Problem::remove_and_eval(
         eval.intersection_count,
         &eval.intersection_count
     );
-    eval.solution.revision_ = Solution::next_revision_.fetch_add(1, std::memory_order_relaxed);
-}
-
-float Problem::score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
-    uint64_t revision = solution_eval.solution.revision();
-    float mu = global_state.mu();
-    if (solution_eval.score_cache_valid &&
-        solution_eval.score_cache_revision == revision &&
-        solution_eval.score_cache_mu == mu) {
-        return solution_eval.score_cache_value;
-    }
-
-    float violation = solution_eval.total_violation();
-    int n_missing = solution_eval.n_missing();
-    float reg = solution_eval.reg();
-
-    float score = solution_eval.objective +
-           global_state.mu() * violation +
-           1.0f * static_cast<float>(n_missing) +
-           1e-6 * reg;
-    solution_eval.score_cache_revision = revision;
-    solution_eval.score_cache_mu = mu;
-    solution_eval.score_cache_value = score;
-    solution_eval.score_cache_valid = true;
-    return score;
 }
 
 void Problem::update_intersection_matrix(

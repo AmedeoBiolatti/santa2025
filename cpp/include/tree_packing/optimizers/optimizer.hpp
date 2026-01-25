@@ -38,12 +38,6 @@ public:
         RNG& rng
     ) = 0;
 
-    // Rollback the last apply (default: no-op)
-    virtual void rollback(SolutionEval& solution, std::any& state) {
-        (void)solution;
-        (void)state;
-    }
-
     // Clone optimizer (deep copy)
     [[nodiscard]] virtual OptimizerPtr clone() const = 0;
 

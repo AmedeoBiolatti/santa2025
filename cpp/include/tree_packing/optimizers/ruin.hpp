@@ -20,8 +20,6 @@ public:
         RNG& rng
     ) override;
 
-    void rollback(SolutionEval& solution, std::any& state) override;
-
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
@@ -43,8 +41,6 @@ public:
         RNG& rng
     ) override;
 
-    void rollback(SolutionEval& solution, std::any& state) override;
-
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
@@ -52,18 +48,13 @@ private:
     bool verbose_;
 };
 
-// State for ruin operators
+// State for ruin operators (simplified - rollback now uses UpdateStack)
 struct RuinState {
     std::vector<int> indices;
     std::vector<std::pair<float, int>> distances;
-    std::vector<TreeParams> prev_params;
-    std::vector<char> prev_valid;
     // Scratch buffers (reused across calls)
     std::vector<std::pair<int, int>> eligible_cells;
     std::vector<Index> cell_items;
-    std::vector<int> valid_indices;
-    std::vector<int> invalid_indices;
-    TreeParamsSoA valid_params;
 };
 
 }  // namespace tree_packing

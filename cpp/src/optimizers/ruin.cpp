@@ -15,13 +15,7 @@ RandomRuin::RandomRuin(int n_remove, bool verbose)
 std::any RandomRuin::init_state(const SolutionEval& solution) {
     (void)solution;
     RuinState state;
-    // Reserve for typical case (<=4 updates)
     state.indices.reserve(8);
-    state.prev_params.reserve(8);
-    state.prev_valid.reserve(8);
-    state.valid_indices.reserve(8);
-    state.invalid_indices.reserve(8);
-    state.valid_params.reserve(8);
     return state;
 }
 
@@ -31,7 +25,6 @@ void RandomRuin::apply(
     GlobalState& global_state,
     RNG& rng
 ) {
-    (void)global_state;
     const auto& params = solution.solution.params();
     size_t n = params.size();
 
@@ -65,57 +58,19 @@ void RandomRuin::apply(
         }
     }
 
-    // Create new solution with updated params
-    ruin_state->prev_params.resize(indices.size());
-    ruin_state->prev_valid.assign(indices.size(), 0);
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (idx < 0 || static_cast<size_t>(idx) >= n) {
-            continue;
-        }
-        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
-            ruin_state->prev_params[k] = solution.solution.get_params(static_cast<size_t>(idx));
-            ruin_state->prev_valid[k] = 1;
+    // Push removals to update stack for rollback support
+    auto& stack = global_state.update_stack();
+    for (int idx : indices) {
+        if (idx >= 0 && static_cast<size_t>(idx) < n && solution.solution.is_valid(static_cast<size_t>(idx))) {
+            TreeParams prev = solution.solution.get_params(static_cast<size_t>(idx));
+            stack.push_remove(idx, prev);
         }
     }
+
     problem_->remove_and_eval(solution, indices);
 
     if (verbose_) {
         std::cout << "[RandomRuin] removed=" << indices.size() << "\n";
-    }
-}
-
-void RandomRuin::rollback(SolutionEval& solution, std::any& state) {
-    auto* ruin_state = std::any_cast<RuinState>(&state);
-    if (!ruin_state) {
-        return;
-    }
-    const auto& indices = ruin_state->indices;
-    if (indices.empty()) {
-        return;
-    }
-    auto& valid_indices = ruin_state->valid_indices;
-    auto& invalid_indices = ruin_state->invalid_indices;
-    auto& valid_params = ruin_state->valid_params;
-    valid_indices.clear();
-    invalid_indices.clear();
-    valid_params.clear();
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (!ruin_state->prev_valid[k]) {
-            invalid_indices.push_back(idx);
-        } else {
-            size_t out_idx = valid_indices.size();
-            valid_indices.push_back(idx);
-            valid_params.resize(valid_indices.size());
-            valid_params.set(out_idx, ruin_state->prev_params[k]);
-        }
-    }
-    if (!invalid_indices.empty()) {
-        problem_->remove_and_eval(solution, invalid_indices);
-    }
-    if (!valid_indices.empty()) {
-        problem_->update_and_eval(solution, valid_indices, valid_params);
     }
 }
 
@@ -131,14 +86,8 @@ CellRuin::CellRuin(int n_remove, bool verbose)
 
 std::any CellRuin::init_state(const SolutionEval& solution) {
     RuinState state;
-    // Reserve for typical case (<=4 updates)
     state.indices.reserve(8);
     state.distances.reserve(solution.solution.size());
-    state.prev_params.reserve(8);
-    state.prev_valid.reserve(8);
-    state.valid_indices.reserve(8);
-    state.invalid_indices.reserve(8);
-    state.valid_params.reserve(8);
     // For CellRuin specific scratch
     int N = solution.solution.grid().grid_N();
     state.eligible_cells.reserve(static_cast<size_t>(N * N));
@@ -152,7 +101,6 @@ void CellRuin::apply(
     GlobalState& global_state,
     RNG& rng
 ) {
-    (void)global_state;
     const auto& params = solution.solution.params();
     const auto& grid = solution.solution.grid();
     int N = grid.grid_N();
@@ -219,57 +167,19 @@ void CellRuin::apply(
         indices.resize(static_cast<size_t>(n_remove_));
     }
 
-    // Create new solution with updated params
-    ruin_state->prev_params.resize(indices.size());
-    ruin_state->prev_valid.assign(indices.size(), 0);
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (idx < 0 || static_cast<size_t>(idx) >= params.size()) {
-            continue;
-        }
-        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
-            ruin_state->prev_params[k] = solution.solution.get_params(static_cast<size_t>(idx));
-            ruin_state->prev_valid[k] = 1;
+    // Push removals to update stack for rollback support
+    auto& stack = global_state.update_stack();
+    for (int idx : indices) {
+        if (idx >= 0 && static_cast<size_t>(idx) < params.size() && solution.solution.is_valid(static_cast<size_t>(idx))) {
+            TreeParams prev = solution.solution.get_params(static_cast<size_t>(idx));
+            stack.push_remove(idx, prev);
         }
     }
+
     problem_->remove_and_eval(solution, indices);
 
     if (verbose_) {
         std::cout << "[CellRuin] removed=" << indices.size() << "\n";
-    }
-}
-
-void CellRuin::rollback(SolutionEval& solution, std::any& state) {
-    auto* ruin_state = std::any_cast<RuinState>(&state);
-    if (!ruin_state) {
-        return;
-    }
-    const auto& indices = ruin_state->indices;
-    if (indices.empty()) {
-        return;
-    }
-    auto& valid_indices = ruin_state->valid_indices;
-    auto& invalid_indices = ruin_state->invalid_indices;
-    auto& valid_params = ruin_state->valid_params;
-    valid_indices.clear();
-    invalid_indices.clear();
-    valid_params.clear();
-    for (size_t k = 0; k < indices.size(); ++k) {
-        int idx = indices[k];
-        if (!ruin_state->prev_valid[k]) {
-            invalid_indices.push_back(idx);
-        } else {
-            size_t out_idx = valid_indices.size();
-            valid_indices.push_back(idx);
-            valid_params.resize(valid_indices.size());
-            valid_params.set(out_idx, ruin_state->prev_params[k]);
-        }
-    }
-    if (!invalid_indices.empty()) {
-        problem_->remove_and_eval(solution, invalid_indices);
-    }
-    if (!valid_indices.empty()) {
-        problem_->update_and_eval(solution, valid_indices, valid_params);
     }
 }
 

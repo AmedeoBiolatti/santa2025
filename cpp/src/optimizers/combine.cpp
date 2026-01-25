@@ -65,16 +65,6 @@ void Chain::apply(
     }
 }
 
-void Chain::rollback(SolutionEval& solution, std::any& state) {
-    auto* states = std::any_cast<std::vector<std::any>>(&state);
-    if (!states) {
-        return;
-    }
-    for (size_t i = optimizers_.size(); i-- > 0;) {
-        optimizers_[i]->rollback(solution, (*states)[i]);
-    }
-}
-
 OptimizerPtr Chain::clone() const {
     std::vector<OptimizerPtr> clones;
     clones.reserve(optimizers_.size());
@@ -133,23 +123,6 @@ void Repeat::apply(
     }
 }
 
-void Repeat::rollback(SolutionEval& solution, std::any& state) {
-    auto* rep_state = std::any_cast<RepeatState>(&state);
-    if (!rep_state || rep_state->history.empty()) {
-        return;
-    }
-    for (size_t i = rep_state->history.size(); i-- > 0;) {
-        rep_state->inner_state = rep_state->history[i];
-        optimizer_->rollback(solution, rep_state->inner_state);
-        if (i == 0) {
-            rep_state->inner_state = rep_state->initial_state;
-        } else {
-            rep_state->inner_state = rep_state->history[i - 1];
-        }
-    }
-    rep_state->history.clear();
-}
-
 OptimizerPtr Repeat::clone() const {
     return std::make_unique<Repeat>(optimizer_->clone(), n_, verbose_);
 }
@@ -201,17 +174,6 @@ void RestoreBest::apply(
         }
     }
     (void)rng;
-}
-
-void RestoreBest::rollback(SolutionEval& solution, std::any& state) {
-    auto* rb_state = std::any_cast<RestoreBestState>(&state);
-    if (!rb_state) {
-        return;
-    }
-    if (rb_state->restored) {
-        solution.copy_from(rb_state->backup);
-        rb_state->restored = false;
-    }
 }
 
 OptimizerPtr RestoreBest::clone() const {
@@ -282,16 +244,6 @@ void RandomChoice::apply(
     return;
 }
 
-void RandomChoice::rollback(SolutionEval& solution, std::any& state) {
-    auto* rc_state = std::any_cast<RandomChoiceState>(&state);
-    if (!rc_state) {
-        return;
-    }
-    int idx = rc_state->last_idx;
-    if (idx >= 0 && idx < static_cast<int>(optimizers_.size())) {
-        optimizers_[idx]->rollback(solution, rc_state->states[idx]);
-    }
-}
 
 OptimizerPtr RandomChoice::clone() const {
     std::vector<OptimizerPtr> clones;

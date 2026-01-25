@@ -4,8 +4,6 @@
 #include <algorithm>
 
 namespace tree_packing {
-std::atomic<uint64_t> Solution::next_revision_{1};
-
 namespace {
 bool float_equal(float a, float b, float tol) {
     if (std::isnan(a) && std::isnan(b)) {
@@ -123,7 +121,6 @@ Solution::Solution(size_t num_trees) {
     valid_.resize(num_trees, false);
     removed_indices_.reserve(8);  // Typical case: few removed at a time
     missing_count_ = static_cast<int>(num_trees);
-    revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 Solution Solution::init_random(size_t num_trees, float side, uint64_t seed) {
@@ -139,7 +136,6 @@ Solution Solution::init_random(size_t num_trees, float side, uint64_t seed) {
     }
 
     sol.recompute_cache();
-    sol.revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
     return sol;
 }
 
@@ -152,7 +148,6 @@ Solution Solution::init_empty(size_t num_trees) {
         sol.removed_indices_[i] = static_cast<int>(i);
     }
     sol.recompute_cache();
-    sol.revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
     return sol;
 }
 
@@ -205,8 +200,6 @@ Solution Solution::init(const TreeParamsSoA& params, int grid_n, float grid_size
 
     // Initialize grid
     sol.grid_ = Grid2D::init(sol.centers_, grid_n, grid_capacity, grid_size);
-    sol.revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
-
     return sol;
 }
 
@@ -217,11 +210,9 @@ void Solution::set_params(size_t i, const TreeParams& p) {
     } else {
         update_cache_for(i, params_finite(p));
     }
-    revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Solution::set_nan(size_t i) {
-    revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
     update_cache_on_removal_for(i);
 }
 
@@ -240,8 +231,6 @@ Solution Solution::update(const TreeParamsSoA& new_params, const std::vector<int
             }
         }
     }
-    sol.revision_ = next_revision_.fetch_add(1, std::memory_order_relaxed);
-
     return sol;
 }
 
@@ -473,7 +462,6 @@ void Solution::copy_from(const Solution& other) {
     removed_indices_ = other.removed_indices_;
     missing_count_ = other.missing_count_;
     grid_ = other.grid_;
-    revision_ = other.revision_;
 }
 
 bool Solution::validate_cache(float tol, bool check_grid) const {

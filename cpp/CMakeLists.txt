@@ -22,6 +22,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     if(ENABLE_SIMD)
         add_compile_options(-march=native)
     endif()
+    # Disable FMA contraction to ensure deterministic floating-point results
+    # FMA has different rounding than separate multiply+add, causing inconsistencies
+    add_compile_options(-ffp-contract=off)
 endif()
 
 # OpenMP
@@ -42,6 +45,7 @@ add_library(tree_packing STATIC
     src/core/solution.cpp
     src/core/problem.cpp
     src/core/global_state.cpp
+    src/core/update_stack.cpp
     src/spatial/grid2d.cpp
     src/geometry/sat.cpp
     src/geometry/intersection.cpp

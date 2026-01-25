@@ -477,7 +477,6 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
 
     // NoiseOptimizer
     py::class_<tree_packing::NoiseOptimizer, tree_packing::Optimizer, std::shared_ptr<tree_packing::NoiseOptimizer>>(m, "NoiseOptimizer")
-        .def(py::init<float, bool>(), py::arg("noise_level") = 0.01f, py::arg("verbose") = false)
         .def(py::init<float, int, bool>(),
             py::arg("noise_level") = 0.01f,
             py::arg("n_change") = 1,

@@ -22,8 +22,6 @@ public:
         RNG& rng
     ) override;
 
-    void rollback(SolutionEval& solution, std::any& state) override;
-
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
@@ -47,8 +45,6 @@ public:
         RNG& rng
     ) override;
 
-    void rollback(SolutionEval& solution, std::any& state) override;
-
     [[nodiscard]] OptimizerPtr clone() const override;
 
 private:
@@ -70,8 +66,6 @@ public:
         GlobalState& global_state,
         RNG& rng
     ) override;
-
-    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
@@ -99,8 +93,6 @@ public:
         GlobalState& global_state,
         RNG& rng
     ) override;
-
-    void rollback(SolutionEval& solution, std::any& state) override;
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
