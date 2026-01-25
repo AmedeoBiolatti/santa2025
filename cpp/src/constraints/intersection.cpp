@@ -17,16 +17,12 @@ IntersectionScratch& scratch() {
     return s;
 }
 
+
 SolutionEval::IntersectionList& ensure_unique_row(
     SolutionEval::IntersectionMap& map,
     size_t idx
 ) {
     auto& row_ptr = map[idx];
-    if (!row_ptr) {
-        row_ptr = std::make_shared<SolutionEval::IntersectionList>();
-    } else if (!row_ptr.unique()) {
-        row_ptr = std::make_shared<SolutionEval::IntersectionList>(*row_ptr);
-    }
     return *row_ptr;
 }
 
@@ -282,22 +278,11 @@ float IntersectionConstraint::eval_update(
     const auto& tri_aabbs = solution.triangle_aabbs();
     const auto& centers = solution.centers();
     const auto& new_grid = solution.grid();
-    size_t n = figures.size();
+    size_t n = solution.figures().size();
 
     float total = prev_total;
     int count = prev_count;
     int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * new_grid.capacity();
-    auto& work = scratch();
-    auto& is_modified = work.is_modified;
-    if (is_modified.size() != n) {
-        is_modified.assign(n, 0);
-    } else {
-        std::fill(is_modified.begin(), is_modified.end(), 0);
-    }
-    for (int idx : modified_indices) {
-        if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
-        is_modified[static_cast<size_t>(idx)] = 1;
-    }
 
     // Remove old values for modified indices
     for (int idx : modified_indices) {
@@ -315,20 +300,12 @@ float IntersectionConstraint::eval_update(
     }
 
     // Compute new values for modified indices using new grid
-    auto& candidates = work.candidates;
-    auto& seen = work.seen;
-    candidates.reserve(static_cast<size_t>(reserve_size));
-    if (seen.size() != n) {
-        seen.assign(n, -1);
-    } else {
-        std::fill(seen.begin(), seen.end(), -1);
-    }
-    int stamp = 0;
+
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
         if (!solution.is_valid(static_cast<size_t>(idx))) continue;
+        candidates_.clear();
 
-        ++stamp;
         auto [ci, cj] = new_grid.get_item_cell(idx);
         const AABB& aabb_i = aabbs[idx];
 
@@ -340,33 +317,30 @@ float IntersectionConstraint::eval_update(
                     continue;
                 }
             }
-            new_grid.get_items_in_cell(ni, nj, candidates);
-            for (Index c : candidates) {
-                if (c < 0) continue;
-                int c_idx = static_cast<int>(c);
-                if (c_idx == idx) continue;
-                if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
-                if (is_modified[static_cast<size_t>(c_idx)] && c_idx < idx) continue;
-                if (seen[c_idx] == stamp) continue;
-                seen[c_idx] = stamp;
+            new_grid.get_items_in_cell(ni, nj, candidates_);
+        }
+        for (Index c : candidates_) {
+            if (c < 0) continue;
+            int c_idx = static_cast<int>(c);
+            if (c_idx == idx) continue;
+            if (c_idx > idx && )
 
-                float score = compute_pair_score_from_normals_per_triangle(
-                    figures[idx],
-                    figures[c_idx],
-                    normals[idx],
-                    normals[c_idx],
-                    tri_aabbs[idx],
-                    tri_aabbs[c_idx],
-                    aabbs[idx],
-                    aabbs[c_idx],
-                    centers[idx],
-                    centers[c_idx]
-                );
-                if (score <= 0.0f) continue;
-                add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
-                total += 2.0f * score;
-                count += 2;
-            }
+            float score = compute_pair_score_from_normals_per_triangle(
+                figures[idx],
+                figures[c_idx],
+                normals[idx],
+                normals[c_idx],
+                tri_aabbs[idx],
+                tri_aabbs[c_idx],
+                aabbs[idx],
+                aabbs[c_idx],
+                centers[idx],
+                centers[c_idx]
+            );
+            if (score <= 0.0f) continue;
+            add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
+            total += 2.0f * score;
+            count += 2;
         }
     }
 

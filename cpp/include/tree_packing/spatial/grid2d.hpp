@@ -66,6 +66,11 @@ public:
     // Compute bounds for a cell index expanded by CENTER_R
     AABB cell_bounds_expanded(int i, int j) const;
 
+    std::pair<float, int> get_min_x(const std::vector<AABB>& aabbs) const;
+    std::pair<float, int> get_max_x(const std::vector<AABB>& aabbs) const;
+    std::pair<float, int> get_min_y(const std::vector<AABB>& aabbs) const;
+    std::pair<float, int> get_max_y(const std::vector<AABB>& aabbs) const;
+
     // Grid parameters
     [[nodiscard]] int grid_n() const { return n_; }
     [[nodiscard]] int grid_N() const { return N_; }
@@ -74,9 +79,13 @@ public:
 private:
     int n_{20};          // Number of cells per dimension
     int N_{22};          // N = n + 2 (with padding)
-    int capacity_{8};   // Max items per cell
+    int capacity_{8};    // Max items per cell
     float size_{1.04f};  // Cell size
     float center_{0.0f}; // Grid center
+    //
+    std::vector<int> i2n_;
+    std::vector<int> j2n_;
+    int min_i_{22}, max_i_{0}, min_j_{22}, max_j_{0};
     // ij2k[i * N * capacity + j * capacity + slot] = item index (-1 if empty)
     std::vector<int> ij2k_;
     // ij2n[i * N + j] = number of items in cell (i, j)

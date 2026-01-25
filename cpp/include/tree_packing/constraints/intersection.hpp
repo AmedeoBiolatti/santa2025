@@ -38,7 +38,14 @@ public:
         int* out_count = nullptr
     ) const;
 
+    [[nodiscard]] void init() {
+        candidates_.reserve(8 * 9);
+    }
+
 private:
+    //
+    mutable std::vector<Index> candidates_;
+
     // Compute intersection score between two figures using spatial grid
     [[nodiscard]] float compute_pair_score(
         const Figure& f0,

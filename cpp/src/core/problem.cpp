@@ -123,9 +123,8 @@ float Problem::objective(const Solution& solution) const {
 }
 
 float Problem::intersection_constraint(const Solution& solution) const {
-    IntersectionConstraint constraint;
     SolutionEval::IntersectionMap map;
-    return constraint.eval(solution, map);
+    return intersection_constraint_.eval(solution, map);
 }
 
 float Problem::bounds_constraint(const Solution& solution) const {
@@ -165,8 +164,7 @@ void Problem::eval_inplace(const Solution& solution, SolutionEval& eval) const {
     }
 
     // Compute intersection constraint with sparse map
-    IntersectionConstraint intersection;
-    eval.intersection_violation = intersection.eval(
+    eval.intersection_violation = intersection_constraint_.eval(
         solution, eval.intersection_map, &eval.intersection_count
     );
 
@@ -309,8 +307,7 @@ void Problem::update_and_eval(
     BoundsConstraint bounds(min_pos_, max_pos_);
     eval.bounds_violation = bounds.eval_update(eval.min_x, eval.max_x, eval.min_y, eval.max_y);
     // const constraint
-    IntersectionConstraint intersection;
-    eval.intersection_violation = intersection.eval_update(
+    eval.intersection_violation = intersection_constraint_.eval_update(
         eval.solution,
         eval.intersection_map,
         indices,
@@ -390,8 +387,7 @@ void Problem::insert_and_eval(
     BoundsConstraint bounds(min_pos_, max_pos_);
     eval.bounds_violation = bounds.eval_update(eval.min_x, eval.max_x, eval.min_y, eval.max_y);
 
-    IntersectionConstraint intersection;
-    eval.intersection_violation = intersection.eval_update(
+    eval.intersection_violation = intersection_constraint_.eval_update(
         eval.solution,
         eval.intersection_map,
         indices,
@@ -442,58 +438,45 @@ void Problem::remove_and_eval(
         }
     }
 
+    if (recompute_min_x || recompute_max_x || recompute_min_y || recompute_max_y) {
+        const auto& aabbs = eval.solution.aabbs();
+        if (recompute_min_x) {
+            auto [min_x, k] = eval.solution.grid_.get_min_x(aabbs);
+            eval.min_x = min_x;
+        }
+        if (recompute_max_x) {
+            auto [max_x, k] = eval.solution.grid_.get_max_x(aabbs);
+            eval.max_x = max_x;
+        }
+        if (recompute_min_y) {
+            auto [min_y, k] = eval.solution.grid_.get_min_y(aabbs);
+            eval.min_y = min_y;
+        }
+        if (recompute_max_y) {
+            auto [max_y, k] = eval.solution.grid_.get_max_y(aabbs);
+            eval.max_y = max_y;
+        }
+    }
     if (recompute_max_abs) {
-        float max_abs = 0.0f;
-        size_t idx = static_cast<size_t>(-1);
-        for (size_t i = 0; i < eval.solution.max_abs_.size(); ++i) {
-            float v = eval.solution.max_abs_[i];
-            if (v > max_abs) {
-                max_abs = v;
-                idx = i;
-            }
+        float max_abs = std::abs(eval.max_x);
+        int idx = eval.max_x_idx;
+
+        if (max_abs < std::abs(eval.min_x)) {
+            max_abs = std::abs(eval.min_x);
+            idx = eval.min_x_idx;
+        }
+        if (max_abs < std::abs(eval.min_y)) {
+            max_abs = std::abs(eval.min_y);
+            idx = eval.min_y_idx;
+        }
+        if (max_abs < std::abs(eval.max_y)) {
+            max_abs = std::abs(eval.max_y);
+            idx = eval.max_y_idx;
         }
         eval.solution.max_max_abs_ = max_abs;
         eval.solution.max_max_abs_idx_ = idx;
     }
 
-    if (recompute_min_x || recompute_max_x || recompute_min_y || recompute_max_y) {
-        const auto& aabbs = eval.solution.aabbs();
-        if (recompute_min_x) {
-            eval.min_x = std::numeric_limits<float>::max();
-            eval.min_x_idx = -1;
-        }
-        if (recompute_max_x) {
-            eval.max_x = std::numeric_limits<float>::lowest();
-            eval.max_x_idx = -1;
-        }
-        if (recompute_min_y) {
-            eval.min_y = std::numeric_limits<float>::max();
-            eval.min_y_idx = -1;
-        }
-        if (recompute_max_y) {
-            eval.max_y = std::numeric_limits<float>::lowest();
-            eval.max_y_idx = -1;
-        }
-        for (size_t i = 0; i < aabbs.size(); ++i) {
-            if (!eval.solution.valid_[i]) continue;
-            if (recompute_min_x && aabbs[i].min.x < eval.min_x) {
-                eval.min_x = aabbs[i].min.x;
-                eval.min_x_idx = static_cast<Index>(i);
-            }
-            if (recompute_max_x && aabbs[i].max.x > eval.max_x) {
-                eval.max_x = aabbs[i].max.x;
-                eval.max_x_idx = static_cast<Index>(i);
-            }
-            if (recompute_min_y && aabbs[i].min.y < eval.min_y) {
-                eval.min_y = aabbs[i].min.y;
-                eval.min_y_idx = static_cast<Index>(i);
-            }
-            if (recompute_max_y && aabbs[i].max.y > eval.max_y) {
-                eval.max_y = aabbs[i].max.y;
-                eval.max_y_idx = static_cast<Index>(i);
-            }
-        }
-    }
     if (eval.valid_count == 0) {
         eval.objective = 0.0f;
     } else {
@@ -506,8 +489,7 @@ void Problem::remove_and_eval(
     BoundsConstraint bounds(min_pos_, max_pos_);
     eval.bounds_violation = bounds.eval_update(eval.min_x, eval.max_x, eval.min_y, eval.max_y);
 
-    IntersectionConstraint intersection;
-    eval.intersection_violation = intersection.eval_remove(
+    eval.intersection_violation = intersection_constraint_.eval_remove(
         eval.solution,
         eval.intersection_map,
         indices,

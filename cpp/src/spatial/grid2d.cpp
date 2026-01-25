@@ -1,6 +1,9 @@
 #include "tree_packing/spatial/grid2d.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <utility>
+#include <iostream>
 
 namespace tree_packing {
 
@@ -13,9 +16,11 @@ Grid2D Grid2D::empty(size_t num_items, int n, float size, int capacity, float ce
     grid.center_ = center;
 
     // Initialize arrays
+    grid.i2n_.resize(grid.N_, 0);
+    grid.j2n_.resize(grid.N_, 0);
     grid.ij2k_.resize(grid.N_ * grid.N_ * capacity, -1);
     grid.ij2n_.resize(grid.N_ * grid.N_, 0);
-    grid.k2ij_.resize(num_items * 2, 0);
+    grid.k2ij_.resize(num_items * 2, -1);
     grid.cell_bounds_.resize(grid.N_ * grid.N_);
     grid.cell_bounds_expanded_.resize(grid.N_ * grid.N_);
     grid.cell_to_non_empty_idx_.resize(grid.N_ * grid.N_, -1);
@@ -103,6 +108,14 @@ void Grid2D::add_item_to_cell(int k, int i, int j) {
     int base = cell_index(i, j);
     int cnt_idx = count_index(i, j);
 
+    ++i2n_[i];
+    ++j2n_[j];
+
+    if (i < min_i_) min_i_ = i;
+    if (i > max_i_) max_i_ = i;
+    if (i < max_j_) min_j_ = j;
+    if (i > max_j_) max_j_ = j;
+
     // Find first empty slot
     for (int s = 0; s < capacity_; ++s) {
         if (ij2k_[base + s] < 0) {
@@ -123,6 +136,16 @@ void Grid2D::remove_item_from_cell(int k, int i, int j) {
     int base = cell_index(i, j);
     int cnt_idx = count_index(i, j);
 
+    --i2n_[i];
+    --j2n_[j];
+
+    // update
+    if (i == min_i_) while ((i2n_[min_i_] == 0) & (min_i_ < N_)) ++min_i_;
+    if (i == max_i_) while ((i2n_[max_i_] == 0) & (max_i_ >= 0)) --max_i_;
+    if (j == min_j_) while ((j2n_[min_j_] == 0) & (min_j_ < N_)) ++min_j_;
+    if (j == max_j_) while ((j2n_[max_j_] == 0) & (max_j_ >= 0)) --max_j_;
+
+    //
     for (int s = 0; s < capacity_; ++s) {
         if (ij2k_[base + s] == k) {
             ij2k_[base + s] = -1;
@@ -151,13 +174,16 @@ void Grid2D::update(int k, const Vec2& new_center) {
 
     auto [new_i, new_j] = compute_ij(new_center);
 
-    // Only update if cell changed
-    if (old_i != new_i || old_j != new_j) {
-        remove_item_from_cell(k, old_i, old_j);
+    if (old_i >= 0 && old_j >= 0) {
+        if (old_i != new_i || old_j != new_j) {
+            remove_item_from_cell(k, old_i, old_j);
+            add_item_to_cell(k, new_i, new_j);
+        }
+    } else {
         add_item_to_cell(k, new_i, new_j);
-        k2ij_[k * 2 + 0] = new_i;
-        k2ij_[k * 2 + 1] = new_j;
     }
+    k2ij_[k * 2 + 0] = new_i;
+    k2ij_[k * 2 + 1] = new_j;
 }
 
 void Grid2D::insert(int k, const Vec2& new_center) {
@@ -171,8 +197,9 @@ void Grid2D::remove(int k) {
     int old_i = k2ij_[k * 2 + 0];
     int old_j = k2ij_[k * 2 + 1];
 
-    // Only update if cell changed
-    remove_item_from_cell(k, old_i, old_j);
+    if (old_i >= 0 && old_i < N_ && old_j >= 0 && old_j < N_) {
+        remove_item_from_cell(k, old_i, old_j);
+    }
     k2ij_[k * 2 + 0] = -1;
     k2ij_[k * 2 + 1] = -1;
 }
@@ -236,11 +263,11 @@ std::vector<Index> Grid2D::get_items_in_cell(int i, int j) const {
 }
 
 void Grid2D::get_items_in_cell(int i, int j, std::vector<Index>& out) const {
+#ifndef NDEBUG
     size_t needed = static_cast<size_t>(capacity_);
     if (out.size() != needed) {
         out.resize(needed);
     }
-#ifndef NDEBUG
     if (i < 0 || i >= N_ || j < 0 || j >= N_) {
         std::fill(out.begin(), out.end(), static_cast<Index>(-1));
         return;
@@ -260,6 +287,94 @@ int Grid2D::cell_count(int i, int j) const {
     }
 #endif
     return ij2n_[count_index(i, j)];
+}
+
+std::pair<float, int> Grid2D::get_max_x(const std::vector<AABB>& aabbs) const {
+    float max_x = std::numeric_limits<float>::lowest();
+    int idx = -1;
+    int i = max_i_;
+    for (int j=min_j_; j<=max_j_; ++j) {
+        if (cell_count(i, j) > 0) {
+            int base = cell_index(i, j);
+            for (int s=0; s<capacity_; ++s) {
+                int k = ij2k_[base + s];
+                if (k >= 0) {
+                    float x = aabbs[k].max.x;
+                    if (x > max_x) {
+                        max_x = x;
+                        idx = k;
+                    }
+                }
+            }
+        }
+    }
+    return {max_x, idx};
+}
+
+std::pair<float, int> Grid2D::get_min_x(const std::vector<AABB>& aabbs) const {
+    float min_x = std::numeric_limits<float>::max();
+    int idx = -1;
+    int i = min_i_;
+    for (int j=min_j_; j<=max_j_; ++j) {
+        if (cell_count(i, j) > 0) {
+            int base = cell_index(i, j);
+            for (int s=0; s<capacity_; ++s) {
+                int k = ij2k_[base + s];
+                if (k >= 0) {
+                    float x = aabbs[k].min.x;
+                    if (x < min_x) {
+                        min_x = x;
+                        idx = k;
+                    }
+                }
+            }
+        }
+    }
+    return {min_x, idx};
+}
+
+std::pair<float, int> Grid2D::get_max_y(const std::vector<AABB>& aabbs) const {
+    float max_y = std::numeric_limits<float>::lowest();
+    int idx = -1;
+    int j = max_j_;
+    for (int i=min_i_; i<=max_i_; ++i) {
+        if (cell_count(i, j) > 0) {
+            int base = cell_index(i, j);
+            for (int s=0; s<capacity_; ++s) {
+                int k = ij2k_[base + s];
+                if (k >= 0) {
+                    float y = aabbs[k].max.y;
+                    if (y > max_y) {
+                        max_y = y;
+                        idx = k;
+                    }
+                }
+            }
+        }
+    }
+    return {max_y, idx};
+}
+
+std::pair<float, int> Grid2D::get_min_y(const std::vector<AABB>& aabbs) const {
+    float min_y = std::numeric_limits<float>::max();
+    int idx = -1;
+    int j = min_j_;
+    for (int i=min_i_; i<=max_i_; ++i) {
+        if (cell_count(i, j) > 0) {
+            int base = cell_index(i, j);
+            for (int s=0; s<capacity_; ++s) {
+                int k = ij2k_[base + s];
+                if (k >= 0) {
+                    float y = aabbs[k].min.y;
+                    if (y < min_y) {
+                        min_y = y;
+                        idx = k;
+                    }
+                }
+            }
+        }
+    }
+    return {min_y, idx};
 }
 
 }  // namespace tree_packing

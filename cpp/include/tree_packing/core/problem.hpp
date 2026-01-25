@@ -2,6 +2,7 @@
 
 #include "solution.hpp"
 #include "global_state.hpp"
+#include "../constraints/intersection.hpp"
 #include <functional>
 
 namespace tree_packing {
@@ -12,7 +13,9 @@ class GlobalState;
 // Problem definition with objective function and constraints
 class Problem {
 public:
-    Problem() = default;
+    Problem() {
+        init();
+    };
 
     // Create the standard tree packing problem
     static Problem create_tree_packing_problem(float side = -1.0f);
@@ -65,9 +68,13 @@ public:
     [[nodiscard]] float min_pos() const { return min_pos_; }
     [[nodiscard]] float max_pos() const { return max_pos_; }
 
+    void init() {
+        intersection_constraint_.init();
+    }
 private:
     float min_pos_{-16.0f * THR / 2.0f};
     float max_pos_{16.0f * THR / 2.0f};
+    IntersectionConstraint intersection_constraint_;
 };
 
 }  // namespace tree_packing
