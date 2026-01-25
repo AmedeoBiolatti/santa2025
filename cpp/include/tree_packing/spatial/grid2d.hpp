@@ -76,6 +76,19 @@ public:
     [[nodiscard]] int grid_N() const { return N_; }
     [[nodiscard]] int capacity() const { return capacity_; }
     [[nodiscard]] float cell_size() const { return size_; }
+    [[nodiscard]] float center() const { return center_; }
+    [[nodiscard]] const std::vector<int>& i2n() const { return i2n_; }
+    [[nodiscard]] const std::vector<int>& j2n() const { return j2n_; }
+    [[nodiscard]] const std::vector<int>& ij2k() const { return ij2k_; }
+    [[nodiscard]] const std::vector<int>& ij2n() const { return ij2n_; }
+    [[nodiscard]] const std::vector<int>& k2ij() const { return k2ij_; }
+    [[nodiscard]] const std::vector<AABB>& cell_bounds_list() const { return cell_bounds_; }
+    [[nodiscard]] const std::vector<AABB>& cell_bounds_expanded_list() const { return cell_bounds_expanded_; }
+    [[nodiscard]] const std::vector<int>& cell_to_non_empty_idx() const { return cell_to_non_empty_idx_; }
+    [[nodiscard]] int min_i() const { return min_i_; }
+    [[nodiscard]] int max_i() const { return max_i_; }
+    [[nodiscard]] int min_j() const { return min_j_; }
+    [[nodiscard]] int max_j() const { return max_j_; }
 private:
     int n_{20};          // Number of cells per dimension
     int N_{22};          // N = n + 2 (with padding)

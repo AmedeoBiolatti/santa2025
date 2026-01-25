@@ -113,8 +113,8 @@ void Grid2D::add_item_to_cell(int k, int i, int j) {
 
     if (i < min_i_) min_i_ = i;
     if (i > max_i_) max_i_ = i;
-    if (i < max_j_) min_j_ = j;
-    if (i > max_j_) max_j_ = j;
+    if (j < min_j_) min_j_ = j;
+    if (j > max_j_) max_j_ = j;
 
     // Find first empty slot
     for (int s = 0; s < capacity_; ++s) {

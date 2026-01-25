@@ -2,6 +2,7 @@
 #include "tree_packing/geometry/sat.hpp"
 #include "tree_packing/core/tree.hpp"
 #include <algorithm>
+#include <iostream>
 
 
 namespace tree_packing {
@@ -283,10 +284,13 @@ float IntersectionConstraint::eval_update(
     float total = prev_total;
     int count = prev_count;
     int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * new_grid.capacity();
+    modified_.clear();
+    candidates_.clear();
 
     // Remove old values for modified indices
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
+        modified_.insert(idx);
 
         auto& row = ensure_unique_row(map, static_cast<size_t>(idx));
         size_t row_size = row.size();
@@ -300,11 +304,9 @@ float IntersectionConstraint::eval_update(
     }
 
     // Compute new values for modified indices using new grid
-
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
         if (!solution.is_valid(static_cast<size_t>(idx))) continue;
-        candidates_.clear();
 
         auto [ci, cj] = new_grid.get_item_cell(idx);
         const AABB& aabb_i = aabbs[idx];
@@ -312,36 +314,33 @@ float IntersectionConstraint::eval_update(
         for (const auto& [di, dj] : NEIGHBOR_DELTAS) {
             int ni = ci + di;
             int nj = cj + dj;
-            if (di != 0 || dj != 0) {
-                if (!aabb_i.intersects(new_grid.cell_bounds_expanded(ni, nj))) {
-                    continue;
-                }
-            }
-            new_grid.get_items_in_cell(ni, nj, candidates_);
-        }
-        for (Index c : candidates_) {
-            if (c < 0) continue;
-            int c_idx = static_cast<int>(c);
-            if (c_idx == idx) continue;
-            if (c_idx > idx && )
 
-            float score = compute_pair_score_from_normals_per_triangle(
-                figures[idx],
-                figures[c_idx],
-                normals[idx],
-                normals[c_idx],
-                tri_aabbs[idx],
-                tri_aabbs[c_idx],
-                aabbs[idx],
-                aabbs[c_idx],
-                centers[idx],
-                centers[c_idx]
-            );
-            if (score <= 0.0f) continue;
-            add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
-            total += 2.0f * score;
-            count += 2;
+            new_grid.get_items_in_cell(ni, nj, candidates_);
+            for (Index c : candidates_) {
+                if (c < 0) continue;
+                int c_idx = static_cast<int>(c);
+                if (c_idx == idx) continue;
+                if (c_idx > idx && modified_.contains(c_idx)) continue;
+
+                float score = compute_pair_score_from_normals_per_triangle(
+                    figures[idx],
+                    figures[c_idx],
+                    normals[idx],
+                    normals[c_idx],
+                    tri_aabbs[idx],
+                    tri_aabbs[c_idx],
+                    aabbs[idx],
+                    aabbs[c_idx],
+                    centers[idx],
+                    centers[c_idx]
+                );
+                if (score <= 0.0f) continue;
+                add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
+                total += 2.0f * score;
+                count += 2;
+            }
         }
+
     }
 
     if (count < 0) {

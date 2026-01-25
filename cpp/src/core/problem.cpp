@@ -178,8 +178,9 @@ void Problem::update_and_eval(
     const std::vector<int>& indices,
     const TreeParamsSoA& new_params
 ) const {
-#ifndef NDEBUG
     size_t n = indices.size();
+#ifndef NDEBUG
+
     if (new_params.size() != n) {
         throw std::runtime_error("update_and_eval: indices and new_params size mismatch");
     }
@@ -208,7 +209,6 @@ void Problem::update_and_eval(
     bool recompute_min_y = false;
     bool recompute_max_y = false;
 
-    const size_t n = indices.size();
     for (size_t k = 0; k < n; ++k) {
         int idx = indices[k];
         size_t i = static_cast<size_t>(idx);

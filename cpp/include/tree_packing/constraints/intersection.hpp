@@ -3,6 +3,7 @@
 #include "../core/solution.hpp"
 #include "../spatial/grid2d.hpp"
 #include <vector>
+#include <set>
 
 namespace tree_packing {
 
@@ -40,11 +41,13 @@ public:
 
     [[nodiscard]] void init() {
         candidates_.reserve(8 * 9);
+        candidates_.resize(8 * 9, -1);
     }
 
 private:
     //
     mutable std::vector<Index> candidates_;
+    mutable std::set<size_t> modified_;
 
     // Compute intersection score between two figures using spatial grid
     [[nodiscard]] float compute_pair_score(
