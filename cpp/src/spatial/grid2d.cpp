@@ -107,6 +107,10 @@ AABB Grid2D::cell_bounds_expanded(int i, int j) const {
 void Grid2D::add_item_to_cell(int k, int i, int j) {
     int base = cell_index(i, j);
     int cnt_idx = count_index(i, j);
+    int old_count = ij2n_[cnt_idx];
+
+    // Cell is full - this shouldn't happen if capacity is set correctly
+    if (old_count >= capacity_) return;
 
     ++i2n_[i];
     ++j2n_[j];
@@ -116,20 +120,14 @@ void Grid2D::add_item_to_cell(int k, int i, int j) {
     if (j < min_j_) min_j_ = j;
     if (j > max_j_) max_j_ = j;
 
-    // Find first empty slot
-    for (int s = 0; s < capacity_; ++s) {
-        if (ij2k_[base + s] < 0) {
-            ij2k_[base + s] = k;
-            int old_count = ij2n_[cnt_idx]++;
-            // Track non-empty cells: add when count goes 0->1
-            if (old_count == 0) {
-                cell_to_non_empty_idx_[cnt_idx] = static_cast<int>(non_empty_cells_.size());
-                non_empty_cells_.emplace_back(i, j);
-            }
-            return;
-        }
+    // Append at end (compact storage)
+    ij2n_[cnt_idx]++;
+    ij2k_[base + old_count] = k;
+    // Track non-empty cells: add when count goes 0->1
+    if (old_count == 0) {
+        cell_to_non_empty_idx_[cnt_idx] = static_cast<int>(non_empty_cells_.size());
+        non_empty_cells_.emplace_back(i, j);
     }
-    // Cell is full - this shouldn't happen if capacity is set correctly
 }
 
 void Grid2D::remove_item_from_cell(int k, int i, int j) {
@@ -145,10 +143,11 @@ void Grid2D::remove_item_from_cell(int k, int i, int j) {
     if (j == min_j_) while ((j2n_[min_j_] == 0) & (min_j_ < N_)) ++min_j_;
     if (j == max_j_) while ((j2n_[max_j_] == 0) & (max_j_ >= 0)) --max_j_;
 
-    //
-    for (int s = 0; s < capacity_; ++s) {
+    int count = ij2n_[cnt_idx];
+    for (int s = 0; s < count; ++s) {
         if (ij2k_[base + s] == k) {
-            ij2k_[base + s] = -1;
+            // Swap with last item to keep compact
+            ij2k_[base + s] = ij2k_[base + count - 1];
             int new_count = --ij2n_[cnt_idx];
             // Track non-empty cells: remove when count goes 1->0
             if (new_count == 0) {
@@ -240,27 +239,19 @@ std::vector<Index> Grid2D::get_candidates_by_cell(int i, int j) const {
 }
 
 size_t Grid2D::get_candidates_by_cell(int i, int j, std::vector<Index>& out) const {
-#ifndef NDEBUG
-    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(capacity_);
-    if (out.size() != needed) {
-        out.resize(needed);
-    }
-    std::fill(out.begin(), out.end(), static_cast<Index>(-1));
-#endif
+    Index* out_ptr = out.data();
+    const int* ij2k = ij2k_.data();
+    const int* ij2n = ij2n_.data();
     size_t out_idx = 0;
-    // Check all 9 neighboring cells
+    // Check all 9 neighboring cells (padding guarantees valid indices)
     for (const auto& [di, dj] : NEIGHBOR_DELTAS) {
         int ni = i + di;
         int nj = j + dj;
-
-        // Skip if out of bounds (shouldn't happen due to padding)
-        if (ni < 0 || ni >= N_ || nj < 0 || nj >= N_) continue;
-
-        int base = cell_index(ni, nj);
-        for (int s = 0; s < capacity_; ++s) {
-            int item = ij2k_[base + s];
-            out[static_cast<size_t>(out_idx)] = static_cast<Index>(item);
-            out_idx += (item >= 0) ? 1 : 0;
+        int count = ij2n[ni * N_ + nj];
+        if (count == 0) continue;
+        int base = ni * N_ * capacity_ + nj * capacity_;
+        for (int s = 0; s < count; ++s) {
+            out_ptr[out_idx++] = static_cast<Index>(ij2k[base + s]);
         }
     }
     return out_idx;
@@ -274,20 +265,14 @@ std::vector<Index> Grid2D::get_items_in_cell(int i, int j) const {
 }
 
 void Grid2D::get_items_in_cell(int i, int j, std::vector<Index>& out) const {
-#ifndef NDEBUG
-    size_t needed = static_cast<size_t>(capacity_);
-    if (out.size() != needed) {
-        out.resize(needed);
-    }
-    if (i < 0 || i >= N_ || j < 0 || j >= N_) {
-        std::fill(out.begin(), out.end(), static_cast<Index>(-1));
-        return;
-    }
-#endif
-    // Copy all slots directly - ij2k_ already has -1 for empty slots
     int base = cell_index(i, j);
-    for (int s = 0; s < capacity_; ++s) {
+    int count = ij2n_[i * N_ + j];
+    // Copy only valid items, fill rest with -1
+    for (int s = 0; s < count; ++s) {
         out[static_cast<size_t>(s)] = static_cast<Index>(ij2k_[base + s]);
+    }
+    for (int s = count; s < capacity_; ++s) {
+        out[static_cast<size_t>(s)] = static_cast<Index>(-1);
     }
 }
 
