@@ -427,15 +427,15 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("iters_since_feasible_improvement", &tree_packing::GlobalState::iters_since_feasible_improvement)
         .def("best_score", &tree_packing::GlobalState::best_score)
         .def("best_feasible_score", &tree_packing::GlobalState::best_feasible_score)
-        .def("best_solution", [](const tree_packing::GlobalState& self) -> py::object {
-            const auto* best = self.best_solution();
+        .def("best_params", [](const tree_packing::GlobalState& self) -> py::object {
+            const auto* best = self.best_params();
             if (!best) {
                 return py::none();
             }
             return py::cast(*best);
         })
-        .def("best_feasible_solution", [](const tree_packing::GlobalState& self) -> py::object {
-            const auto* best = self.best_feasible_solution();
+        .def("best_feasible_params", [](const tree_packing::GlobalState& self) -> py::object {
+            const auto* best = self.best_feasible_params();
             if (!best) {
                 return py::none();
             }

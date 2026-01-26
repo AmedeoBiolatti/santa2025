@@ -200,6 +200,10 @@ Solution Solution::init(const TreeParamsSoA& params, int grid_n, float grid_size
 
     // Initialize grid
     sol.grid_ = Grid2D::init(sol.centers_, grid_n, grid_capacity, grid_size);
+
+    // Initialize figure hash
+    sol.figure_hash_ = FigureHash2D::init(sol.centers_, sol.valid_);
+
     return sol;
 }
 
@@ -285,7 +289,14 @@ void Solution::recompute_cache() {
         }
     }
     recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
-    grid_ = Grid2D::init(centers_, 16, 8, THR);
+    // Capacity needs to be large enough to hold all trees that might be in one cell
+    // With cell size THR (~1.0) and trees in a ~1.6x1.6 area, most trees end up in 1-4 cells
+    // Use num_trees as capacity to ensure no overflow
+    int grid_capacity = std::max(8, static_cast<int>(params_.size()));
+    grid_ = Grid2D::init(centers_, 16, grid_capacity, THR);
+
+    // Initialize figure hash
+    figure_hash_ = FigureHash2D::init(centers_, valid_);
 }
 
 void Solution::update_cache_for(size_t i) {
@@ -347,6 +358,11 @@ void Solution::update_cache_for(size_t i, bool new_valid) {
         recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
     }
     grid_.update(static_cast<int>(i), centers_[i]);
+    if (valid_[i]) {
+        figure_hash_.update(static_cast<int>(i), centers_[i]);
+    } else {
+        figure_hash_.remove(static_cast<int>(i));
+    }
 }
 
 void Solution::update_cache_on_removal_for(size_t i) {
@@ -359,6 +375,7 @@ void Solution::update_cache_on_removal_for(size_t i) {
     removed_indices_.push_back(static_cast<int>(i));
     ++missing_count_;
     grid_.remove(static_cast<int>(i));
+    figure_hash_.remove(static_cast<int>(i));
     invalidate_cache(
         figures_[i],
         centers_[i],
@@ -391,6 +408,7 @@ void Solution::update_cache_on_update_for(size_t i, const TreeParams& p) {
         recompute_max_abs_cache(max_abs_, max_max_abs_, max_max_abs_idx_);
     }
     grid_.update(static_cast<int>(i), centers_[i]);
+    figure_hash_.update(static_cast<int>(i), centers_[i]);
 }
 
 int Solution::update_cache_on_transition(size_t i, bool new_valid) {
@@ -443,6 +461,7 @@ void Solution::update_cache_on_insertion_for(size_t i) {
         max_max_abs_idx_ = i;
     }
     grid_.insert(static_cast<int>(i), centers_[i]);
+    figure_hash_.insert(static_cast<int>(i), centers_[i]);
 }
 
 void Solution::copy_from(const Solution& other) {
@@ -462,6 +481,7 @@ void Solution::copy_from(const Solution& other) {
     removed_indices_ = other.removed_indices_;
     missing_count_ = other.missing_count_;
     grid_ = other.grid_;
+    figure_hash_ = other.figure_hash_;
 }
 
 bool Solution::validate_cache(float tol, bool check_grid) const {

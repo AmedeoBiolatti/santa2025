@@ -7,12 +7,22 @@
 
 namespace tree_packing {
 
-// 9-neighborhood deltas for candidate search
+// 9-neighborhood deltas for candidate search (3x3)
 constexpr std::array<std::pair<int, int>, 9> NEIGHBOR_DELTAS = {{
     {0, -1}, {-1, -1}, {+1, -1},
     {0, 0},  {-1, 0},  {+1, 0},
     {0, +1}, {-1, +1}, {+1, +1}
 }};
+
+// 25-neighborhood deltas for finer grid search (5x5)
+constexpr std::array<std::pair<int, int>, 25> NEIGHBOR_DELTAS_5x5 = {{
+    {-2, -2}, {-1, -2}, {0, -2}, {+1, -2}, {+2, -2},
+    {-2, -1}, {-1, -1}, {0, -1}, {+1, -1}, {+2, -1},
+    {-2,  0}, {-1,  0}, {0,  0}, {+1,  0}, {+2,  0},
+    {-2, +1}, {-1, +1}, {0, +1}, {+1, +1}, {+2, +1},
+    {-2, +2}, {-1, +2}, {0, +2}, {+1, +2}, {+2, +2}
+}};
+
 constexpr size_t CAPACITY = 8;
 
 // 2D spatial grid for efficient neighbor queries

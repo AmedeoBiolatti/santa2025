@@ -46,6 +46,9 @@ add_library(tree_packing STATIC
     src/core/global_state.cpp
     src/core/update_stack.cpp
     src/spatial/grid2d.cpp
+    src/spatial/triangle_grid2d.cpp
+    src/spatial/triangle_hash2d.cpp
+    src/spatial/figure_hash2d.cpp
     src/geometry/sat.cpp
     src/geometry/intersection.cpp
     src/constraints/intersection.cpp
@@ -139,4 +142,7 @@ if(BUILD_EXAMPLES)
 
     add_executable(benchmark examples/benchmark.cpp)
     target_link_libraries(benchmark PRIVATE tree_packing)
+
+    add_executable(benchmark_grids examples/benchmark_grids.cpp)
+    target_link_libraries(benchmark_grids PRIVATE tree_packing)
 endif()

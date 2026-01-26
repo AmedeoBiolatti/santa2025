@@ -59,19 +59,18 @@ void require_maps_equal(const SolutionEval::IntersectionMap& a,
     for (size_t i = 0; i < a.size(); ++i) {
         const auto& lhs = a[i];
         const auto& rhs = b[i];
-        if (!lhs && !rhs) {
+        if (lhs.empty() && rhs.empty()) {
             continue;
         }
-        REQUIRE(static_cast<bool>(lhs) == static_cast<bool>(rhs));
-        REQUIRE(lhs->size() == rhs->size());
+        REQUIRE(lhs.size() == rhs.size());
         std::vector<std::pair<Index, float>> left;
         std::vector<std::pair<Index, float>> right;
-        left.reserve(lhs->size());
-        right.reserve(rhs->size());
-        for (const auto& entry : *lhs) {
+        left.reserve(lhs.size());
+        right.reserve(rhs.size());
+        for (const auto& entry : lhs) {
             left.emplace_back(entry.neighbor, entry.score);
         }
-        for (const auto& entry : *rhs) {
+        for (const auto& entry : rhs) {
             right.emplace_back(entry.neighbor, entry.score);
         }
         auto cmp = [](const std::pair<Index, float>& x, const std::pair<Index, float>& y) {

@@ -7,8 +7,8 @@ GlobalState::GlobalState(uint64_t seed) : rng_(seed) {}
 
 GlobalState::GlobalState(uint64_t seed, const SolutionEval& initial_solution)
     : rng_(seed)
-    , best_solution_(initial_solution)
-    , best_feasible_solution_(initial_solution)
+    , best_params_(initial_solution.solution.params())
+    , best_feasible_params_(initial_solution.solution.params())
 {
 }
 
@@ -43,17 +43,17 @@ void GlobalState::maybe_update_best(const Problem& problem, const SolutionEval& 
     bool is_feasible = violation < tol_;
     float score = problem.score(solution, *this);
 
-    // Update best overall
+    // Update best overall (only copy params, not the full solution)
     if (score < best_score_) {
         best_score_ = score;
-        best_solution_ = solution;
+        best_params_ = solution.solution.params();
         iters_since_improvement_ = 0;
     }
 
-    // Update best feasible
+    // Update best feasible (only copy params)
     if (is_feasible && score < best_feasible_score_) {
         best_feasible_score_ = score;
-        best_feasible_solution_ = solution;
+        best_feasible_params_ = solution.solution.params();
         iters_since_feasible_improvement_ = 0;
     }
 }

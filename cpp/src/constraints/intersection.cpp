@@ -66,6 +66,7 @@ void add_pair(
 }
 
 }  // namespace
+
 float IntersectionConstraint::compute_pair_score_from_normals_per_triangle(
     const Figure& f0,
     const Figure& f1,
@@ -167,7 +168,11 @@ float IntersectionConstraint::eval(
     size_t n = figures.size();
 
     map.resize(n);
-    int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * grid.capacity();
+    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(grid.capacity());
+    if (candidates_.size() < needed) {
+        candidates_.resize(needed);
+    }
+    int reserve_size = static_cast<int>(needed);
     for (auto& row : map) {
         row.clear();
         row.reserve(reserve_size);
@@ -237,8 +242,14 @@ float IntersectionConstraint::eval_update(
     int count = prev_count;
     modified_.clear();
 
+    // Ensure candidates_ is large enough
+    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(new_grid.capacity());
+    if (candidates_.size() < needed) {
+        candidates_.resize(needed);
+    }
+
     // Remove old values for modified indices
-    int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * new_grid.capacity();
+    int reserve_size = static_cast<int>(needed);
     for (int idx : modified_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
         modified_.insert(idx);
@@ -360,6 +371,187 @@ float IntersectionConstraint::eval_remove(
         *out_count = count;
     }
     return total;
+}
+
+// ============ Figure Hash Based Methods ============
+
+float IntersectionConstraint::eval_figure_hash(
+    const Solution& solution,
+    SolutionEval::IntersectionMap& map,
+    int* out_count
+) const {
+    const auto& figures = solution.figures();
+    const auto& normals = solution.normals();
+    const auto& aabbs = solution.aabbs();
+    const auto& tri_aabbs = solution.triangle_aabbs();
+    const auto& centers = solution.centers();
+    const auto& fig_hash = solution.figure_hash();
+    size_t n = figures.size();
+
+    map.resize(n);
+    // Ensure candidates_ is large enough
+    size_t needed = n;  // Worst case: all figures in neighboring cells
+    if (candidates_.size() < needed) {
+        candidates_.resize(needed);
+    }
+    int reserve_size = static_cast<int>(needed);
+    for (auto& row : map) {
+        row.clear();
+        row.reserve(reserve_size);
+    }
+
+    float total_violation = 0.0f;
+    int count = 0;
+
+    for (size_t i = 0; i < n; ++i) {
+        if (!solution.is_valid(i)) continue;
+
+        int i_idx = static_cast<int>(i);
+        auto [ci, cj] = fig_hash.get_item_cell(i_idx);
+
+        size_t n_candidates = fig_hash.get_candidates_by_cell(ci, cj, candidates_);
+        size_t t = 0;
+        for (Index c : candidates_) {
+            if ((t++) >= n_candidates) break;
+            if (c < 0) continue;
+            int c_idx = static_cast<int>(c);
+            if (static_cast<size_t>(c_idx) <= i) continue;
+            if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
+
+            float score = compute_pair_score_from_normals_per_triangle(
+                figures[i],
+                figures[c_idx],
+                normals[i],
+                normals[c_idx],
+                tri_aabbs[i],
+                tri_aabbs[c_idx],
+                aabbs[i],
+                aabbs[c_idx],
+                centers[i],
+                centers[c_idx]
+            );
+            if (score <= 0.0f) continue;
+            add_pair(map, i, static_cast<size_t>(c_idx), score);
+            total_violation += 2.0f * score;  // Count both directions
+            count += 2;
+        }
+    }
+
+    if (out_count) {
+        *out_count = count;
+    }
+    return total_violation;
+}
+
+float IntersectionConstraint::eval_update_figure_hash(
+    const Solution& solution,
+    SolutionEval::IntersectionMap& map,
+    const std::vector<int>& modified_indices,
+    float prev_total,
+    int prev_count,
+    int* out_count
+) const {
+    const auto& figures = solution.figures();
+    const auto& normals = solution.normals();
+    const auto& aabbs = solution.aabbs();
+    const auto& tri_aabbs = solution.triangle_aabbs();
+    const auto& centers = solution.centers();
+    const auto& fig_hash = solution.figure_hash();
+    size_t n = solution.figures().size();
+
+    float total = prev_total;
+    int count = prev_count;
+    modified_.clear();
+
+    // Ensure candidates_ is large enough
+    size_t needed = n;
+    if (candidates_.size() < needed) {
+        candidates_.resize(needed);
+    }
+
+    // Remove old values for modified indices
+    int reserve_size = static_cast<int>(needed);
+    for (int idx : modified_indices) {
+        if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
+        modified_.insert(idx);
+
+        auto& row = get_row(map, static_cast<size_t>(idx));
+        size_t row_size = row.size();
+        for (const auto& entry : row) {
+            total -= 2.0f * entry.score;
+            erase_entry_with_back(map, static_cast<size_t>(entry.neighbor), static_cast<size_t>(entry.back_index));
+        }
+        count -= static_cast<int>(row_size) * 2;
+        row.clear();
+        row.reserve(reserve_size);
+    }
+
+    // Compute new values for modified indices using figure hash
+    for (int idx : modified_indices) {
+        if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
+        if (!solution.is_valid(static_cast<size_t>(idx))) continue;
+
+        auto [ci, cj] = fig_hash.get_item_cell(idx);
+
+        size_t n_candidates = fig_hash.get_candidates_by_cell(ci, cj, candidates_);
+        size_t i = 0;
+        for (Index c : candidates_) {
+            if ((i++) >= n_candidates) break;
+            if (c < 0) continue;
+            int c_idx = static_cast<int>(c);
+            if (c_idx == idx) continue;
+            if (c_idx > idx && modified_.contains(c_idx)) continue;
+
+            float score = compute_pair_score_from_normals_per_triangle(
+                figures[idx],
+                figures[c_idx],
+                normals[idx],
+                normals[c_idx],
+                tri_aabbs[idx],
+                tri_aabbs[c_idx],
+                aabbs[idx],
+                aabbs[c_idx],
+                centers[idx],
+                centers[c_idx]
+            );
+            if (score <= 0.0f) continue;
+            add_pair(map, static_cast<size_t>(idx), static_cast<size_t>(c_idx), score);
+            total += 2.0f * score;
+            count += 2;
+        }
+    }
+
+    if (count < 0) {
+        count = 0;
+    }
+
+#ifndef NDEBUG
+    // Recompute total from map to avoid floating point drift
+    total = 0.0f;
+    for (size_t i = 0; i < map.size(); ++i) {
+        for (const auto& entry : map[i]) {
+            total += entry.score;
+        }
+    }
+#endif
+
+    if (out_count) {
+        *out_count = count;
+    }
+    return total;
+}
+
+float IntersectionConstraint::eval_remove_figure_hash(
+    const Solution& solution,
+    SolutionEval::IntersectionMap& map,
+    const std::vector<int>& removed_indices,
+    float prev_total,
+    int prev_count,
+    int* out_count
+) const {
+    // Removal logic is the same - just remove from map
+    // (The figure hash is already updated by Solution)
+    return eval_remove(solution, map, removed_indices, prev_total, prev_count, out_count);
 }
 
 }  // namespace tree_packing
