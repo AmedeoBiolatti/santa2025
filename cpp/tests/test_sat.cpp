@@ -65,13 +65,6 @@ TEST_CASE("SAT intersection", "[sat]") {
         REQUIRE(score > 0.0f);
     }
 
-    SECTION("NaN triangles") {
-        Triangle t1(Vec2(0.0f, 0.0f), Vec2(1.0f, 0.0f), Vec2(0.5f, 1.0f));
-        Triangle t2(Vec2::nan(), Vec2::nan(), Vec2::nan());
-
-        float score = triangles_intersection_score(t1, t2);
-        REQUIRE(score == 0.0f);
-    }
 }
 
 TEST_CASE("Figure intersection", "[sat]") {

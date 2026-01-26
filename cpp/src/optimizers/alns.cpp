@@ -71,11 +71,10 @@ void ALNS::update_weights(std::vector<float>& weights, int index, float reward) 
 }
 
 void ALNS::apply(
-    const SolutionEval& solution,
+    SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng,
-    SolutionEval& out
+    RNG& rng
 ) {
     auto* alns_state = std::any_cast<ALNSState>(&state);
     if (!alns_state) {
@@ -83,28 +82,31 @@ void ALNS::apply(
         alns_state = std::any_cast<ALNSState>(&state);
     }
 
+    // Evaluate current solution to compare
+    float current_score = problem_->score(solution, global_state);
+
     // Select ruin operator
     int ruin_idx = select_index(alns_state->ruin_weights, rng);
     RNG ruin_rng = rng.split();
+    alns_state->last_ruin_idx = ruin_idx;
 
-    // Apply ruin
+    // Apply ruin in-place
     ruin_operators_[ruin_idx]->apply(
-        solution, alns_state->ruin_states[ruin_idx], global_state, ruin_rng, alns_state->ruined
+        solution, alns_state->ruin_states[ruin_idx], global_state, ruin_rng
     );
 
     // Select recreate operator
     int recreate_idx = select_index(alns_state->recreate_weights, rng);
     RNG recreate_rng = rng.split();
+    alns_state->last_recreate_idx = recreate_idx;
 
-    // Apply recreate into output buffer
+    // Apply recreate in-place
     recreate_operators_[recreate_idx]->apply(
-        alns_state->ruined, alns_state->recreate_states[recreate_idx], global_state, recreate_rng,
-        out
+        solution, alns_state->recreate_states[recreate_idx], global_state, recreate_rng
     );
 
     // Evaluate both solutions to compare
-    float current_score = problem_->score(solution, global_state);
-    float new_score = problem_->score(out, global_state);
+    float new_score = problem_->score(solution, global_state);
 
     // Compute reward
     float reward = (new_score < current_score) ? reward_improve_ : reward_no_improve_;
@@ -122,8 +124,6 @@ void ALNS::apply(
                   << " score: " << current_score << "->" << new_score
                   << " reward=" << reward << "\n";
     }
-
-    // Result already in out
 }
 
 OptimizerPtr ALNS::clone() const {

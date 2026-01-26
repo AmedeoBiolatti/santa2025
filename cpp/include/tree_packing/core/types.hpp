@@ -162,10 +162,12 @@ struct TreeParams {
     constexpr TreeParams(float x, float y, float angle_)
         : pos(x, y), angle(angle_) {}
 
+    [[deprecated("use Solution::is_valid or explicit validity flags instead")]]
     [[nodiscard]] bool is_nan() const {
         return pos.is_nan() || std::isnan(angle);
     }
 
+    [[deprecated("use Solution::set_nan or explicit validity flags instead")]]
     void set_nan() {
         pos = Vec2::nan();
         angle = std::numeric_limits<float>::quiet_NaN();
@@ -213,6 +215,24 @@ struct TreeParamsSoA {
         x.resize(n, 0.0f);
         y.resize(n, 0.0f);
         angle.resize(n, 0.0f);
+    }
+
+    void reserve(size_t n) {
+        x.reserve(n);
+        y.reserve(n);
+        angle.reserve(n);
+    }
+
+    void clear() {
+        x.clear();
+        y.clear();
+        angle.clear();
+    }
+
+    void push_back(const TreeParams& params) {
+        x.push_back(params.pos.x);
+        y.push_back(params.pos.y);
+        angle.push_back(params.angle);
     }
 
     [[nodiscard]] TreeParams get(size_t i) const {

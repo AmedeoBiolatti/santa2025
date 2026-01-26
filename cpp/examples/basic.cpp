@@ -32,7 +32,7 @@ int main() {
     std::vector<OptimizerPtr> recreate_ops;
 
     ruin_ops.push_back(std::make_unique<RandomRuin>(1));
-    ruin_ops.push_back(std::make_unique<SpatialRuin>(2));
+    ruin_ops.push_back(std::make_unique<CellRuin>(2));
     recreate_ops.push_back(std::make_unique<RandomRecreate>(1));
     recreate_ops.push_back(std::make_unique<RandomRecreate>(2));
 
@@ -70,12 +70,9 @@ int main() {
 
     for (int i = 0; i < num_iterations; ++i) {
         RNG rng(global_state.split_rng());
-        SolutionEval new_eval;
-        sa.apply(eval, state, global_state, rng, new_eval);
-        global_state.maybe_update_best(problem, new_eval);
+        sa.apply(eval, state, global_state, rng);
+        global_state.maybe_update_best(problem, eval);
         global_state.next();
-
-        eval = new_eval;
 
         // Print progress every 500 iterations
         if ((i + 1) % 500 == 0) {

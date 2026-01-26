@@ -42,11 +42,14 @@ public:
     [[nodiscard]] const std::vector<Figure>& figures() const { return figures_; }
     [[nodiscard]] const std::vector<Vec2>& centers() const { return centers_; }
     [[nodiscard]] const std::vector<AABB>& aabbs() const { return aabbs_; }
+    [[nodiscard]] const std::vector<std::array<AABB, TREE_NUM_TRIANGLES>>& triangle_aabbs() const {
+        return triangle_aabbs_;
+    }
     [[nodiscard]] const std::vector<float>& max_abs() const { return max_abs_; }
+    [[nodiscard]] const std::vector<std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>>& normals() const { return normals_; }
     [[nodiscard]] float max_abs(size_t i) const { return max_abs_[i]; }
     [[nodiscard]] float max_max_abs() const { return max_max_abs_; }
     [[nodiscard]] size_t max_max_abs_idx() const { return max_max_abs_idx_; }
-    [[nodiscard]] uint64_t revision() const { return revision_; }
     [[nodiscard]] const Grid2D& grid() const { return grid_; }
     [[nodiscard]] bool is_valid(size_t i) const { return valid_[i]; }
 
@@ -59,6 +62,9 @@ public:
 
     // Count missing (NaN) trees
     [[nodiscard]] int n_missing() const { return missing_count_; }
+
+    // Get indices of removed (invalid) trees - O(1), no iteration needed
+    [[nodiscard]] const std::vector<int>& removed_indices() const { return removed_indices_; }
 
     // Regularization term (max absolute position)
     [[nodiscard]] float reg() const;
@@ -77,20 +83,27 @@ public:
 
 protected:
     friend class Problem;
-    static std::atomic<uint64_t> next_revision_;
     TreeParamsSoA params_;
     std::vector<Figure> figures_;
     std::vector<Vec2> centers_;
     std::vector<AABB> aabbs_;
+    std::vector<std::array<AABB, TREE_NUM_TRIANGLES>> triangle_aabbs_;
     std::vector<float> max_abs_;
+    std::vector<std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>> normals_;
     float max_max_abs_{0.0f};
     size_t max_max_abs_idx_{static_cast<size_t>(-1)};
+    int64_t reg_sum_int_{0};  // Cached sum of (int)(1000 * max_abs_) for valid trees
     std::vector<char> valid_;
+    std::vector<int> removed_indices_;  // Tracks invalid tree indices (order doesn't matter)
     int missing_count_{0};
     Grid2D grid_;
-    uint64_t revision_{0};
 
     void update_cache_for(size_t i);
+    void update_cache_for(size_t i, bool new_valid);
+    void update_cache_on_removal_for(size_t i);
+    void update_cache_on_insertion_for(size_t i);
+    void update_cache_on_update_for(size_t i, const TreeParams& p);
+    int update_cache_on_transition(size_t i, bool new_valid);
 };
 
 // Evaluated solution with objective and constraints
@@ -101,10 +114,17 @@ struct SolutionEval {
     // Constraint evaluations
     float intersection_violation{0.0f};
     float bounds_violation{0.0f};
+    int intersection_count{0};
 
     // Intersection map (cached for incremental updates)
-    using IntersectionList = std::vector<std::pair<Index, float>>;
-    using IntersectionMap = std::vector<std::shared_ptr<IntersectionList>>;
+    // Stores each pair (i,j) in both directions for O(1) removal
+    struct IntersectionEntry {
+        Index neighbor{-1};
+        float score{0.0f};
+        int back_index{-1};  // Index in neighbor's list pointing back
+    };
+    using IntersectionList = std::vector<IntersectionEntry>;
+    using IntersectionMap = std::vector<IntersectionList>;
     IntersectionMap intersection_map;
 
     // Cached bounds for incremental objective updates
@@ -117,7 +137,6 @@ struct SolutionEval {
     Index max_x_idx{-1};
     Index min_y_idx{-1};
     Index max_y_idx{-1};
-    mutable uint64_t score_cache_revision{std::numeric_limits<uint64_t>::max()};
     mutable float score_cache_mu{std::numeric_limits<float>::quiet_NaN()};
     mutable float score_cache_value{0.0f};
     mutable bool score_cache_valid{false};
@@ -127,6 +146,7 @@ struct SolutionEval {
         objective = other.objective;
         intersection_violation = other.intersection_violation;
         bounds_violation = other.bounds_violation;
+        intersection_count = other.intersection_count;
         valid_count = other.valid_count;
         min_x = other.min_x;
         max_x = other.max_x;
@@ -137,10 +157,7 @@ struct SolutionEval {
         min_y_idx = other.min_y_idx;
         max_y_idx = other.max_y_idx;
 
-        if (intersection_map.size() != other.intersection_map.size()) {
-            intersection_map.resize(other.intersection_map.size());
-        }
-        std::copy(other.intersection_map.begin(), other.intersection_map.end(), intersection_map.begin());
+        intersection_map = other.intersection_map;
     }
 
     [[nodiscard]] float total_violation() const {

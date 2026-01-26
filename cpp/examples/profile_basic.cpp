@@ -2,10 +2,14 @@
 #include <string>
 #include "tree_packing/tree_packing.hpp"
 
+#ifdef COUNT_INTERSECTIONS
+extern void print_intersection_stats();
+#endif
+
 using namespace tree_packing;
 
 int main(int argc, char** argv) {
-    int num_iterations = 2000000;
+    int num_iterations = 20000000;
     if (argc > 1) {
         try {
             num_iterations = std::stoi(argv[1]);
@@ -17,7 +21,7 @@ int main(int argc, char** argv) {
     Problem problem = Problem::create_tree_packing_problem();
 
     const int num_trees = 199;
-    const float side = 10.0f;
+    const float side = 1.0f;
     const uint64_t seed = 42;
 
     Solution initial = Solution::init_random(num_trees, side, seed);
@@ -27,9 +31,9 @@ int main(int argc, char** argv) {
     std::vector<OptimizerPtr> recreate_ops;
 
     ruin_ops.push_back(std::make_unique<RandomRuin>(1));
-    ruin_ops.push_back(std::make_unique<SpatialRuin>(2));
+    //ruin_ops.push_back(std::make_unique<CellRuin>(2));
     recreate_ops.push_back(std::make_unique<RandomRecreate>(1));
-    recreate_ops.push_back(std::make_unique<RandomRecreate>(2));
+    //recreate_ops.push_back(std::make_unique<RandomRecreate>(2));
 
     auto alns = std::make_unique<ALNS>(
         std::move(ruin_ops),
@@ -55,16 +59,16 @@ int main(int argc, char** argv) {
     std::any state = sa.init_state(eval);
     GlobalState global_state(seed, eval);
 
-    {
-        SolutionEval out;
-        sa.run(eval, state, global_state, num_iterations, out);
-        eval = out;
-    }
+    sa.run(eval, state, global_state, num_iterations);
 
     std::cout << "Done: iterations=" << global_state.iteration()
               << " best_feasible=" << global_state.best_feasible_score()
               << " best=" << global_state.best_score()
               << "\n";
+
+#ifdef COUNT_INTERSECTIONS
+    print_intersection_stats();
+#endif
 
     return 0;
 }

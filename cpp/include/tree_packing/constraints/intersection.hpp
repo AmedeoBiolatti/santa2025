@@ -3,18 +3,22 @@
 #include "../core/solution.hpp"
 #include "../spatial/grid2d.hpp"
 #include <vector>
+#include <set>
 
 namespace tree_packing {
 
 // Intersection constraint: penalizes overlapping trees
 class IntersectionConstraint {
 public:
-    IntersectionConstraint() = default;
+    IntersectionConstraint() {
+        init();
+    };
 
     // Full evaluation (compute sparse intersection map)
     [[nodiscard]] float eval(
         const Solution& solution,
-        SolutionEval::IntersectionMap& map
+        SolutionEval::IntersectionMap& map,
+        int* out_count = nullptr
     ) const;
 
     // Incremental evaluation (update map for modified indices)
@@ -22,14 +26,62 @@ public:
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         const std::vector<int>& modified_indices,
-        float prev_total
+        float prev_total,
+        int prev_count,
+        int* out_count = nullptr
     ) const;
 
+    // Incremental evaluation for removals only (no recomputation for removed indices)
+    [[nodiscard]] float eval_remove(
+        const Solution& solution,
+        SolutionEval::IntersectionMap& map,
+        const std::vector<int>& removed_indices,
+        float prev_total,
+        int prev_count,
+        int* out_count = nullptr
+    ) const;
+
+    [[nodiscard]] void init() {
+        size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(CAPACITY) * 2;
+        candidates_.reserve(needed);
+        candidates_.resize(needed);
+        std::fill(candidates_.begin(), candidates_.end(), static_cast<Index>(-1));
+    }
+
 private:
+    //
+    mutable std::vector<Index> candidates_;
+    mutable std::set<size_t> modified_;
+
     // Compute intersection score between two figures using spatial grid
     [[nodiscard]] float compute_pair_score(
         const Figure& f0,
         const Figure& f1,
+        const Vec2& c0,
+        const Vec2& c1
+    ) const;
+
+    // Compute intersection score using cached triangle normals
+    [[nodiscard]] float compute_pair_score_from_normals(
+        const Figure& f0,
+        const Figure& f1,
+        const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
+        const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n1,
+        const AABB& aabb0,
+        const AABB& aabb1,
+        const Vec2& c0,
+        const Vec2& c1
+    ) const;
+
+    [[nodiscard]] float compute_pair_score_from_normals_per_triangle(
+        const Figure& f0,
+        const Figure& f1,
+        const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
+        const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n1,
+        const std::array<AABB, TREE_NUM_TRIANGLES>& taabb0,
+        const std::array<AABB, TREE_NUM_TRIANGLES>& taabb1,
+        const AABB& aabb0,
+        const AABB& aabb1,
         const Vec2& c0,
         const Vec2& c1
     ) const;

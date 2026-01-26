@@ -14,6 +14,7 @@ class Optimizer;
 // Unique pointer alias for optimizers
 using OptimizerPtr = std::unique_ptr<Optimizer>;
 
+
 // Base optimizer interface
 class Optimizer {
 public:
@@ -31,11 +32,10 @@ public:
 
     // Apply one optimization step in-place
     virtual void apply(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        RNG& rng,
-        SolutionEval& out
+        RNG& rng
     ) = 0;
 
     // Clone optimizer (deep copy)
@@ -43,19 +43,17 @@ public:
 
     // Full optimization step (apply + update best)
     void step(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
-        GlobalState& global_state,
-        SolutionEval& out
+        GlobalState& global_state
     );
 
     // Run multiple steps in sequence
     void run(
-        const SolutionEval& solution,
+        SolutionEval& solution,
         std::any& state,
         GlobalState& global_state,
-        int n,
-        SolutionEval& out
+        int n
     );
 
 protected:

@@ -2,6 +2,7 @@
 
 #include "solution.hpp"
 #include "global_state.hpp"
+#include "../constraints/intersection.hpp"
 #include <functional>
 
 namespace tree_packing {
@@ -12,7 +13,9 @@ class GlobalState;
 // Problem definition with objective function and constraints
 class Problem {
 public:
-    Problem() = default;
+    Problem() {
+        init();
+    };
 
     // Create the standard tree packing problem
     static Problem create_tree_packing_problem(float side = -1.0f);
@@ -23,23 +26,15 @@ public:
     // Evaluate in-place (reuse buffers in eval)
     void eval_inplace(const Solution& solution, SolutionEval& eval) const;
 
-    // Incremental evaluation (only recompute for modified indices)
-    [[nodiscard]] SolutionEval eval_update(
-        const Solution& solution,
-        const SolutionEval& prev_eval,
-        const std::vector<int>& modified_indices
-    ) const;
-
-    // Incremental evaluation in-place (reuse buffers in eval)
-    void eval_update_inplace(
-        const Solution& solution,
-        const SolutionEval& prev_eval,
-        const std::vector<int>& modified_indices,
-        SolutionEval& eval
-    ) const;
-
     // Update solution params in-place and evaluate full objective/constraints.
     void update_and_eval(
+        SolutionEval& eval,
+        const std::vector<int>& indices,
+        const TreeParamsSoA& new_params
+    ) const;
+
+    // Specialized path for inserting previously invalid trees
+    void insert_and_eval(
         SolutionEval& eval,
         const std::vector<int>& indices,
         const TreeParamsSoA& new_params
@@ -52,7 +47,16 @@ public:
     ) const;
 
     // Compute score (objective + penalty * violations + missing penalty)
-    [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const;
+    [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
+        float mu = global_state.mu();
+
+        float violation = solution_eval.total_violation();
+        int n_missing = solution_eval.n_missing();
+        float reg = solution_eval.reg();
+
+        float score = solution_eval.objective + mu * violation + 1.0f * static_cast<float>(n_missing) + 1e-6 * reg;
+        return score;
+    }
 
     // Objective function (bounding box area / num_trees)
     [[nodiscard]] float objective(const Solution& solution) const;
@@ -73,9 +77,13 @@ public:
     [[nodiscard]] float min_pos() const { return min_pos_; }
     [[nodiscard]] float max_pos() const { return max_pos_; }
 
+    void init() {
+        intersection_constraint_.init();
+    }
 private:
     float min_pos_{-16.0f * THR / 2.0f};
     float max_pos_{16.0f * THR / 2.0f};
+    IntersectionConstraint intersection_constraint_;
 };
 
 }  // namespace tree_packing

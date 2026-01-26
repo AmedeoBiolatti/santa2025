@@ -21,7 +21,7 @@ float objective_naive_from_params(const Solution& solution) {
     int valid_count = 0;
 
     for (size_t i = 0; i < n; ++i) {
-        if (params.is_nan(i)) continue;
+        if (!solution.is_valid(i)) continue;
         TreeParams p = params.get(i);
         for (size_t t = 0; t < TREE_NUM_TRIANGLES; ++t) {
             Triangle tri = transform_triangle(p.pos, p.angle, TREE_SHAPE[t]);
@@ -64,8 +64,16 @@ void require_maps_equal(const SolutionEval::IntersectionMap& a,
         }
         REQUIRE(static_cast<bool>(lhs) == static_cast<bool>(rhs));
         REQUIRE(lhs->size() == rhs->size());
-        std::vector<std::pair<Index, float>> left = *lhs;
-        std::vector<std::pair<Index, float>> right = *rhs;
+        std::vector<std::pair<Index, float>> left;
+        std::vector<std::pair<Index, float>> right;
+        left.reserve(lhs->size());
+        right.reserve(rhs->size());
+        for (const auto& entry : *lhs) {
+            left.emplace_back(entry.neighbor, entry.score);
+        }
+        for (const auto& entry : *rhs) {
+            right.emplace_back(entry.neighbor, entry.score);
+        }
         auto cmp = [](const std::pair<Index, float>& x, const std::pair<Index, float>& y) {
             if (x.first != y.first) return x.first < y.first;
             return x.second < y.second;
@@ -199,8 +207,16 @@ TEST_CASE("Incremental eval matches full eval", "[incremental]") {
     p11.angle -= 0.2f;
     updated.set_params(11, p11);
 
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+    std::vector<int> removed_indices = {5};
+    problem.remove_and_eval(inc, removed_indices);
+
+    std::vector<int> update_indices = {2, 7, 11};
+    TreeParamsSoA new_params(update_indices.size());
+    for (size_t i = 0; i < update_indices.size(); ++i) {
+        new_params.set(i, updated.get_params(static_cast<size_t>(update_indices[i])));
+    }
+    problem.update_and_eval(inc, update_indices, new_params);
     require_eval_matches_full(problem, updated, inc);
 }
 
@@ -261,7 +277,6 @@ TEST_CASE("Incremental eval handles validity transitions", "[incremental]") {
     SolutionEval prev = problem.eval(sol);
 
     Solution updated = sol;
-    std::vector<int> indices = {2, 5, 7, 12};
 
     updated.set_nan(2);
     updated.set_params(5, TreeParams(1.0f, -1.0f, 0.1f));
@@ -270,26 +285,47 @@ TEST_CASE("Incremental eval handles validity transitions", "[incremental]") {
     updated.set_params(7, p7);
     updated.set_params(12, TreeParams(-2.0f, 1.5f, -0.2f));
 
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+
+    // Remove tree 2 (valid -> invalid)
+    std::vector<int> removed_indices = {2};
+    problem.remove_and_eval(inc, removed_indices);
+
+    // Update tree 7 (valid -> valid)
+    std::vector<int> update_indices = {7};
+    TreeParamsSoA update_params(1);
+    update_params.set(0, updated.get_params(7));
+    problem.update_and_eval(inc, update_indices, update_params);
+
+    // Insert trees 5 and 12 (invalid -> valid)
+    std::vector<int> insert_indices = {5, 12};
+    TreeParamsSoA insert_params(2);
+    insert_params.set(0, updated.get_params(5));
+    insert_params.set(1, updated.get_params(12));
+    problem.insert_and_eval(inc, insert_indices, insert_params);
+
     require_eval_matches_full(problem, updated, inc);
 }
 
-TEST_CASE("Update and eval handles validity transitions", "[incremental]") {
+TEST_CASE("Update and eval only updates valid trees", "[incremental]") {
     Problem problem = Problem::create_tree_packing_problem();
     Solution sol = Solution::init_random(20, 7.0f, 77);
-    sol.set_nan(5);
-    sol.set_nan(12);
     SolutionEval eval = problem.eval(sol);
 
-    std::vector<int> indices = {5, 7, 12};
+    // All indices are valid trees
+    std::vector<int> indices = {3, 7, 15};
     std::vector<TreeParams> params;
     params.reserve(indices.size());
-    params.emplace_back(TreeParams(1.0f, -1.0f, 0.1f));  // idx 5 -> valid
+    TreeParams p3 = sol.get_params(3);
+    p3.pos.x += 0.5f;
+    p3.pos.y -= 0.3f;
+    params.emplace_back(p3);
     TreeParams p7 = sol.get_params(7);
     p7.pos.x += 0.35f;
     params.emplace_back(p7);
-    params.emplace_back(TreeParams(-2.0f, 1.5f, -0.2f));  // idx 12 -> valid
+    TreeParams p15 = sol.get_params(15);
+    p15.angle += 0.2f;
+    params.emplace_back(p15);
 
     TreeParamsSoA new_params(indices.size());
     for (size_t i = 0; i < indices.size(); ++i) {
@@ -299,9 +335,39 @@ TEST_CASE("Update and eval handles validity transitions", "[incremental]") {
     problem.update_and_eval(eval, indices, new_params);
 
     Solution updated = sol;
-    updated.set_params(5, params[0]);
+    updated.set_params(3, params[0]);
     updated.set_params(7, params[1]);
-    updated.set_params(12, params[2]);
+    updated.set_params(15, params[2]);
+    require_cache_valid(eval.solution);
+    require_figures_unchanged(before, eval.solution, indices, 1e-4f);
+    require_figures_changed(before, eval.solution, indices, 1e-4f);
+    require_figures_match(updated, eval.solution, 1e-4f);
+    require_eval_matches_full(problem, updated, eval);
+}
+
+TEST_CASE("Insert and eval inserts invalid trees", "[incremental]") {
+    Problem problem = Problem::create_tree_packing_problem();
+    Solution sol = Solution::init_random(20, 7.0f, 77);
+    sol.set_nan(5);
+    sol.set_nan(12);
+    SolutionEval eval = problem.eval(sol);
+
+    // Insert trees 5 and 12 (invalid -> valid)
+    std::vector<int> indices = {5, 12};
+    std::vector<TreeParams> params;
+    params.emplace_back(TreeParams(1.0f, -1.0f, 0.1f));
+    params.emplace_back(TreeParams(-2.0f, 1.5f, -0.2f));
+
+    TreeParamsSoA new_params(indices.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        new_params.set(i, params[i]);
+    }
+    Solution before = sol;
+    problem.insert_and_eval(eval, indices, new_params);
+
+    Solution updated = sol;
+    updated.set_params(5, params[0]);
+    updated.set_params(12, params[1]);
     require_cache_valid(eval.solution);
     require_figures_unchanged(before, eval.solution, indices, 1e-4f);
     require_figures_changed(before, eval.solution, indices, 1e-4f);
@@ -344,8 +410,10 @@ TEST_CASE("Incremental eval handles bounds invalidation", "[incremental]") {
     updated.set_params(static_cast<size_t>(idx), p);
 
     std::vector<int> indices = {idx};
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+    TreeParamsSoA new_params(indices.size());
+    new_params.set(0, p);
+    problem.update_and_eval(inc, indices, new_params);
     require_eval_matches_full(problem, updated, inc);
 }
 
@@ -386,8 +454,12 @@ TEST_CASE("Incremental eval keeps intersection map consistent", "[incremental]")
     updated.set_params(4, TreeParams(-1.1f, -0.3f, -0.4f));
     updated.set_params(9, TreeParams(0.4f, -1.5f, 0.9f));
 
-    SolutionEval inc;
-    problem.eval_update_inplace(updated, prev, indices, inc);
+    SolutionEval inc = prev;
+    TreeParamsSoA new_params(indices.size());
+    for (size_t i = 0; i < indices.size(); ++i) {
+        new_params.set(i, updated.get_params(static_cast<size_t>(indices[i])));
+    }
+    problem.update_and_eval(inc, indices, new_params);
 
     IntersectionConstraint constraint;
     SolutionEval::IntersectionMap map;

@@ -14,6 +14,41 @@ constexpr std::array<Triangle, TREE_NUM_TRIANGLES> TREE_SHAPE = {{
     Triangle{Vec2{0.075f, 0.0f}, Vec2{-0.075f, 0.0f}, Vec2{-0.075f, -0.2f}}
 }};
 
+// Precomputed edge normals for TREE_SHAPE (from santa.tree_packing.tree.TREE_NORMALS)
+constexpr std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES> TREE_NORMALS = {{
+    {Vec2{0.9230769230769231f, -0.3846153846153846f},
+     Vec2{-0.0f, 1.0f},
+     Vec2{-0.9230769230769231f, -0.3846153846153846f}},
+    {Vec2{-0.8762160353251135f, -0.4819187497721559f},
+     Vec2{0.8762160353251135f, -0.4819187497721559f},
+     Vec2{-0.0f, 1.0f}},
+    {Vec2{-0.7071067811865476f, -0.7071067811865476f},
+     Vec2{0.7071067811865476f, -0.7071067811865476f},
+     Vec2{-0.0f, 1.0f}},
+    {Vec2{0.8f, -0.6f},
+     Vec2{-0.0f, 1.0f},
+     Vec2{-1.0f, 0.0f}},
+    {Vec2{-0.0f, -1.0f},
+     Vec2{1.0f, 0.0f},
+     Vec2{-0.8f, 0.6f}}
+}};
+
+// Triangles centers and radius
+constexpr std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES> TRIANGLE_CENTERS = {
+  Vec2{ 0.0f,  0.62395835f },   // t1
+  Vec2{ 0.0f,  0.37681818f },   // t2
+  Vec2{ 0.0f,  0.0f        },   // t3
+  Vec2{ 0.0f, -0.10000000f },   // t4
+  Vec2{ 0.0f, -0.10000000f },   // t5
+};
+constexpr std::array<float, TREE_NUM_TRIANGLES> TRIANGLE_RADII = {
+  0.17604166f,  // t1
+  0.23681818f,  // t2
+  0.34999999f,  // t3  (float32 representation of 0.35)
+  0.12500000f,  // t4
+  0.12500000f,  // t5
+};
+
 // Disjoint tree shape (for area computation)
 constexpr size_t TREE_DISJOINT_NUM_TRIANGLES = 7;
 constexpr std::array<Triangle, TREE_DISJOINT_NUM_TRIANGLES> TREE_DISJOINT_SHAPE = {{
@@ -93,6 +128,18 @@ constexpr float THR2 = THR * THR;
     float c = std::cos(angle);
     float s = std::sin(angle);
     return Vec2{x - s * CENTER_Y, y + c * CENTER_Y};
+}
+
+// Get rotated edge normals for a tree given angle
+[[nodiscard]] inline void get_tree_normals(
+    float angle,
+    std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& out
+) {
+    for (size_t i = 0; i < TREE_NUM_TRIANGLES; ++i) {
+        for (size_t j = 0; j < 3; ++j) {
+            out[i][j] = rotate_point(TREE_NORMALS[i][j], angle);
+        }
+    }
 }
 
 // Batch transform params to figures

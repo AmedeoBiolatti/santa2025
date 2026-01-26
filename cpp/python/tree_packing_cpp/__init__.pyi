@@ -14,7 +14,7 @@ __all__ = [
     "Optimizer",
     "OptimizerState",
     "RandomRuin",
-    "SpatialRuin",
+    "CellRuin",
     "RandomRecreate",
     "NoiseOptimizer",
     "Chain",

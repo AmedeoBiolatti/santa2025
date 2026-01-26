@@ -13,10 +13,11 @@ struct OptimizerState {
     std::any value;
 };
 
-py::array_t<float> make_array_view(const std::vector<float>& data, py::handle base) {
-    return py::array_t<float>(
+template <typename T>
+py::array_t<T> make_array_view(const std::vector<T>& data, py::handle base) {
+    return py::array_t<T>(
         {static_cast<py::ssize_t>(data.size())},
-        {static_cast<py::ssize_t>(sizeof(float))},
+        {static_cast<py::ssize_t>(sizeof(T))},
         data.data(),
         base
     );
@@ -44,6 +45,84 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("__repr__", [](const tree_packing::Vec2& v) {
             return "Vec2(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")";
         });
+
+    py::class_<tree_packing::AABB>(m, "AABB")
+        .def(py::init<>())
+        .def(py::init<const tree_packing::Vec2&, const tree_packing::Vec2&>())
+        .def_readwrite("min", &tree_packing::AABB::min)
+        .def_readwrite("max", &tree_packing::AABB::max)
+        .def("center", &tree_packing::AABB::center)
+        .def("size", &tree_packing::AABB::size)
+        .def("contains", &tree_packing::AABB::contains)
+        .def("intersects", &tree_packing::AABB::intersects);
+
+    py::class_<tree_packing::Grid2D>(m, "Grid2D")
+        .def(py::init<>())
+        .def_static("empty", &tree_packing::Grid2D::empty,
+            py::arg("num_items"),
+            py::arg("n") = 20,
+            py::arg("size") = 1.04f,
+            py::arg("capacity") = 16,
+            py::arg("center") = 0.0f)
+        .def_static("init", &tree_packing::Grid2D::init,
+            py::arg("centers"),
+            py::arg("n") = 16,
+            py::arg("capacity") = 8,
+            py::arg("size") = 1.04f,
+            py::arg("center") = 0.0f)
+        .def("grid_n", &tree_packing::Grid2D::grid_n)
+        .def("grid_N", &tree_packing::Grid2D::grid_N)
+        .def("capacity", &tree_packing::Grid2D::capacity)
+        .def("cell_size", &tree_packing::Grid2D::cell_size)
+        .def("center", &tree_packing::Grid2D::center)
+        .def("compute_ij", &tree_packing::Grid2D::compute_ij)
+        .def("get_item_cell", &tree_packing::Grid2D::get_item_cell)
+        .def("cell_bounds", &tree_packing::Grid2D::cell_bounds)
+        .def("cell_bounds_expanded", &tree_packing::Grid2D::cell_bounds_expanded)
+        .def("cell_count", &tree_packing::Grid2D::cell_count)
+        .def("get_candidates", [](const tree_packing::Grid2D& self, int k) {
+            return self.get_candidates(k);
+        })
+        .def("get_candidates_by_pos", [](const tree_packing::Grid2D& self, const tree_packing::Vec2& pos) {
+            return self.get_candidates_by_pos(pos);
+        })
+        .def("get_candidates_by_cell", [](const tree_packing::Grid2D& self, int i, int j) {
+            return self.get_candidates_by_cell(i, j);
+        })
+        .def("get_items_in_cell", [](const tree_packing::Grid2D& self, int i, int j) {
+            return self.get_items_in_cell(i, j);
+        })
+        .def("non_empty_cells", [](const tree_packing::Grid2D& self) {
+            return py::cast(self.non_empty_cells());
+        })
+        .def_property_readonly("i2n", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.i2n(), py::cast(&self));
+        })
+        .def_property_readonly("j2n", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.j2n(), py::cast(&self));
+        })
+        .def_property_readonly("ij2k", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.ij2k(), py::cast(&self));
+        })
+        .def_property_readonly("ij2n", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.ij2n(), py::cast(&self));
+        })
+        .def_property_readonly("k2ij", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.k2ij(), py::cast(&self));
+        })
+        .def_property_readonly("cell_to_non_empty_idx", [](const tree_packing::Grid2D& self) {
+            return make_array_view(self.cell_to_non_empty_idx(), py::cast(&self));
+        })
+        .def_property_readonly("cell_bounds_data", [](const tree_packing::Grid2D& self) {
+            return py::cast(self.cell_bounds_list());
+        })
+        .def_property_readonly("cell_bounds_expanded_data", [](const tree_packing::Grid2D& self) {
+            return py::cast(self.cell_bounds_expanded_list());
+        })
+        .def_property_readonly("min_i", &tree_packing::Grid2D::min_i)
+        .def_property_readonly("max_i", &tree_packing::Grid2D::max_i)
+        .def_property_readonly("min_j", &tree_packing::Grid2D::min_j)
+        .def_property_readonly("max_j", &tree_packing::Grid2D::max_j);
 
     // TreeParams
     py::class_<tree_packing::TreeParams>(m, "TreeParams")
@@ -107,6 +186,30 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
                 self.angle.assign(ptr, ptr + buf.size);
             });
 
+    m.def("params_to_figures", [](const tree_packing::TreeParamsSoA& params) {
+        std::vector<tree_packing::Figure> figures;
+        figures.resize(params.size());
+        tree_packing::params_to_figures(params, figures);
+
+        py::ssize_t n = static_cast<py::ssize_t>(figures.size());
+        py::ssize_t t = static_cast<py::ssize_t>(tree_packing::TREE_NUM_TRIANGLES);
+        py::array_t<float> arr({n, t, static_cast<py::ssize_t>(3), static_cast<py::ssize_t>(2)});
+        auto buf = arr.mutable_unchecked<4>();
+        for (py::ssize_t i = 0; i < n; ++i) {
+            const auto& fig = figures[static_cast<size_t>(i)];
+            for (py::ssize_t ti = 0; ti < t; ++ti) {
+                const auto& tri = fig.triangles[static_cast<size_t>(ti)];
+                buf(i, ti, 0, 0) = tri.v0.x;
+                buf(i, ti, 0, 1) = tri.v0.y;
+                buf(i, ti, 1, 0) = tri.v1.x;
+                buf(i, ti, 1, 1) = tri.v1.y;
+                buf(i, ti, 2, 0) = tri.v2.x;
+                buf(i, ti, 2, 1) = tri.v2.y;
+            }
+        }
+        return arr;
+    });
+
     // Solution
     py::class_<tree_packing::Solution>(m, "Solution")
         .def(py::init<>())
@@ -114,6 +217,38 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def_static("init_random", &tree_packing::Solution::init_random,
             py::arg("num_trees"), py::arg("side") = 10.0f, py::arg("seed") = 42)
         .def_static("init_empty", &tree_packing::Solution::init_empty)
+        .def_static("from_numpy", [](
+            py::array_t<float> positions,
+            py::array_t<float> angles,
+            int grid_n,
+            float grid_size,
+            int grid_capacity
+        ) {
+            auto pos_buf = positions.unchecked<2>();
+            auto ang_buf = angles.unchecked<1>();
+
+            py::ssize_t n = pos_buf.shape(0);
+            if (pos_buf.shape(1) != 2) {
+                throw py::value_error("positions must have shape (N, 2)");
+            }
+            if (ang_buf.shape(0) != n) {
+                throw py::value_error("angles must have same length as positions");
+            }
+
+            tree_packing::TreeParamsSoA params(static_cast<size_t>(n));
+            for (py::ssize_t i = 0; i < n; ++i) {
+                params.x[static_cast<size_t>(i)] = pos_buf(i, 0);
+                params.y[static_cast<size_t>(i)] = pos_buf(i, 1);
+                params.angle[static_cast<size_t>(i)] = ang_buf(i);
+            }
+            return tree_packing::Solution::init(params, grid_n, grid_size, grid_capacity);
+        },
+            py::arg("positions"),
+            py::arg("angles"),
+            py::arg("grid_n") = 16,
+            py::arg("grid_size") = tree_packing::THR,
+            py::arg("grid_capacity") = 8,
+            "Create Solution from numpy arrays. positions: (N, 2), angles: (N,)")
         .def("size", &tree_packing::Solution::size)
         .def("n_missing", &tree_packing::Solution::n_missing)
         .def("reg", &tree_packing::Solution::reg)
@@ -124,7 +259,108 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("get_params", &tree_packing::Solution::get_params)
         .def("set_params", &tree_packing::Solution::set_params)
         .def("set_nan", &tree_packing::Solution::set_nan)
-        .def("recompute_cache", &tree_packing::Solution::recompute_cache);
+        .def("recompute_cache", &tree_packing::Solution::recompute_cache)
+        .def("grid", [](const tree_packing::Solution& self) -> const tree_packing::Grid2D& {
+            return self.grid();
+        }, py::return_value_policy::reference_internal)
+        .def("centers", [](const tree_packing::Solution& self) {
+            py::ssize_t n = static_cast<py::ssize_t>(self.centers().size());
+            py::array_t<float> arr({n, static_cast<py::ssize_t>(2)});
+            auto buf = arr.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                const auto& c = self.centers()[static_cast<size_t>(i)];
+                buf(i, 0) = c.x;
+                buf(i, 1) = c.y;
+            }
+            return arr;
+        })
+        .def("aabbs", [](const tree_packing::Solution& self) {
+            py::ssize_t n = static_cast<py::ssize_t>(self.aabbs().size());
+            py::array_t<float> arr({n, static_cast<py::ssize_t>(4)});
+            auto buf = arr.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                const auto& aabb = self.aabbs()[static_cast<size_t>(i)];
+                buf(i, 0) = aabb.min.x;
+                buf(i, 1) = aabb.min.y;
+                buf(i, 2) = aabb.max.x;
+                buf(i, 3) = aabb.max.y;
+            }
+            return arr;
+        })
+        .def("max_abs", [](const tree_packing::Solution& self) {
+            return make_array_view(self.max_abs(), py::cast(&self));
+        })
+        .def("figures", [](const tree_packing::Solution& self) {
+            py::ssize_t n = static_cast<py::ssize_t>(self.figures().size());
+            py::ssize_t t = static_cast<py::ssize_t>(tree_packing::TREE_NUM_TRIANGLES);
+            py::array_t<float> arr({n, t, static_cast<py::ssize_t>(3), static_cast<py::ssize_t>(2)});
+            auto buf = arr.mutable_unchecked<4>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                const auto& fig = self.figures()[static_cast<size_t>(i)];
+                for (py::ssize_t ti = 0; ti < t; ++ti) {
+                    const auto& tri = fig.triangles[static_cast<size_t>(ti)];
+                    buf(i, ti, 0, 0) = tri.v0.x;
+                    buf(i, ti, 0, 1) = tri.v0.y;
+                    buf(i, ti, 1, 0) = tri.v1.x;
+                    buf(i, ti, 1, 1) = tri.v1.y;
+                    buf(i, ti, 2, 0) = tri.v2.x;
+                    buf(i, ti, 2, 1) = tri.v2.y;
+                }
+            }
+            return arr;
+        })
+        .def("set_params_from_numpy", [](
+            tree_packing::Solution& self,
+            py::array_t<float> positions,
+            py::array_t<float> angles
+        ) {
+            auto pos_buf = positions.unchecked<2>();
+            auto ang_buf = angles.unchecked<1>();
+
+            py::ssize_t n = pos_buf.shape(0);
+            if (pos_buf.shape(1) != 2) {
+                throw py::value_error("positions must have shape (N, 2)");
+            }
+            if (ang_buf.shape(0) != n) {
+                throw py::value_error("angles must have same length as positions");
+            }
+            if (static_cast<size_t>(n) != self.size()) {
+                throw py::value_error("array size must match solution size");
+            }
+
+            auto& params = self.params();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                params.x[static_cast<size_t>(i)] = pos_buf(i, 0);
+                params.y[static_cast<size_t>(i)] = pos_buf(i, 1);
+                params.angle[static_cast<size_t>(i)] = ang_buf(i);
+            }
+            self.recompute_cache();
+        },
+            py::arg("positions"),
+            py::arg("angles"),
+            "Set all parameters from numpy arrays. positions: (N, 2), angles: (N,)")
+        .def("get_params_as_numpy", [](const tree_packing::Solution& self) {
+            const auto& params = self.params();
+            py::ssize_t n = static_cast<py::ssize_t>(params.size());
+
+            // Create positions array (N, 2)
+            py::array_t<float> positions({n, static_cast<py::ssize_t>(2)});
+            auto pos_buf = positions.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                pos_buf(i, 0) = params.x[static_cast<size_t>(i)];
+                pos_buf(i, 1) = params.y[static_cast<size_t>(i)];
+            }
+
+            // Create angles array (N,) - use explicit shape
+            std::vector<py::ssize_t> ang_shape = {n};
+            py::array_t<float> angles(ang_shape);
+            float* ang_ptr = angles.mutable_data();
+            for (py::ssize_t i = 0; i < n; ++i) {
+                ang_ptr[i] = params.angle[static_cast<size_t>(i)];
+            }
+
+            return py::make_tuple(positions, angles);
+        }, "Get parameters as numpy arrays. Returns (positions, angles) where positions is (N, 2) and angles is (N,)");
 
     // SolutionEval
     py::class_<tree_packing::SolutionEval>(m, "SolutionEval")
@@ -133,6 +369,37 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def_readwrite("objective", &tree_packing::SolutionEval::objective)
         .def_readwrite("intersection_violation", &tree_packing::SolutionEval::intersection_violation)
         .def_readwrite("bounds_violation", &tree_packing::SolutionEval::bounds_violation)
+        .def("intersection_map", [](const tree_packing::SolutionEval& self) {
+            py::list out;
+            for (const auto& row : self.intersection_map) {
+                py::list row_list;
+                for (const auto& entry : row) {
+                    row_list.append(py::make_tuple(entry.neighbor, entry.score));
+                }
+                out.append(row_list);
+            }
+            return out;
+        })
+        .def("intersection_matrix", [](const tree_packing::SolutionEval& self) {
+            size_t n = self.intersection_map.size();
+            py::array_t<float> mat({static_cast<py::ssize_t>(n),
+                                    static_cast<py::ssize_t>(n)});
+            auto buf = mat.mutable_unchecked<2>();
+            for (py::ssize_t i = 0; i < static_cast<py::ssize_t>(n); ++i) {
+                for (py::ssize_t j = 0; j < static_cast<py::ssize_t>(n); ++j) {
+                    buf(i, j) = 0.0f;
+                }
+            }
+            for (size_t i = 0; i < n; ++i) {
+                for (const auto& entry : self.intersection_map[i]) {
+                    if (entry.neighbor < 0) continue;
+                    size_t j = static_cast<size_t>(entry.neighbor);
+                    if (j >= n) continue;
+                    buf(static_cast<py::ssize_t>(i), static_cast<py::ssize_t>(j)) = entry.score;
+                }
+            }
+            return mat;
+        })
         .def("copy_from", &tree_packing::SolutionEval::copy_from)
         .def("total_violation", &tree_packing::SolutionEval::total_violation)
         .def("n_missing", &tree_packing::SolutionEval::n_missing)
@@ -144,7 +411,6 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def_static("create_tree_packing_problem", &tree_packing::Problem::create_tree_packing_problem,
             py::arg("side") = -1.0f)
         .def("eval", &tree_packing::Problem::eval)
-        .def("eval_update", &tree_packing::Problem::eval_update)
         .def("score", &tree_packing::Problem::score)
         .def("objective", &tree_packing::Problem::objective)
         .def("min_pos", &tree_packing::Problem::min_pos)
@@ -161,6 +427,20 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("iters_since_feasible_improvement", &tree_packing::GlobalState::iters_since_feasible_improvement)
         .def("best_score", &tree_packing::GlobalState::best_score)
         .def("best_feasible_score", &tree_packing::GlobalState::best_feasible_score)
+        .def("best_solution", [](const tree_packing::GlobalState& self) -> py::object {
+            const auto* best = self.best_solution();
+            if (!best) {
+                return py::none();
+            }
+            return py::cast(*best);
+        })
+        .def("best_feasible_solution", [](const tree_packing::GlobalState& self) -> py::object {
+            const auto* best = self.best_feasible_solution();
+            if (!best) {
+                return py::none();
+            }
+            return py::cast(*best);
+        })
         .def("mu", &tree_packing::GlobalState::mu)
         .def("set_mu", &tree_packing::GlobalState::set_mu)
         .def("tolerance", &tree_packing::GlobalState::tolerance)
@@ -195,8 +475,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             tree_packing::RNG& rng
         ) {
-            tree_packing::SolutionEval out;
-            self.apply(solution, state.value, global_state, rng, out);
+            tree_packing::SolutionEval out = solution;
+            self.apply(out, state.value, global_state, rng);
             return py::make_tuple(out, OptimizerState{state.value});
         })
         .def("step", [](
@@ -205,8 +485,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             OptimizerState& state,
             tree_packing::GlobalState& global_state
         ) {
-            tree_packing::SolutionEval out;
-            self.step(solution, state.value, global_state, out);
+            tree_packing::SolutionEval out = solution;
+            self.step(out, state.value, global_state);
             return py::make_tuple(out, OptimizerState{state.value}, global_state);
         })
         .def("run", [](
@@ -216,8 +496,8 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             int n
         ) {
-            tree_packing::SolutionEval out;
-            self.run(solution, state.value, global_state, n, out);
+            tree_packing::SolutionEval out = solution;
+            self.run(out, state.value, global_state, n);
             return py::make_tuple(out, OptimizerState{state.value}, global_state);
         })
         .def("apply_inplace", [](
@@ -227,9 +507,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             tree_packing::RNG& rng
         ) {
-            tree_packing::SolutionEval out;
-            self.apply(solution, state.value, global_state, rng, out);
-            solution.copy_from(out);
+            self.apply(solution, state.value, global_state, rng);
         })
         .def("step_inplace", [](
             tree_packing::Optimizer& self,
@@ -237,9 +515,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             OptimizerState& state,
             tree_packing::GlobalState& global_state
         ) {
-            tree_packing::SolutionEval out;
-            self.step(solution, state.value, global_state, out);
-            solution.copy_from(out);
+            self.step(solution, state.value, global_state);
         })
         .def("run_inplace", [](
             tree_packing::Optimizer& self,
@@ -248,17 +524,15 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             tree_packing::GlobalState& global_state,
             int n
         ) {
-            tree_packing::SolutionEval out;
-            self.run(solution, state.value, global_state, n, out);
-            solution.copy_from(out);
+            self.run(solution, state.value, global_state, n);
         });
 
     // RandomRuin
     py::class_<tree_packing::RandomRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::RandomRuin>>(m, "RandomRuin")
         .def(py::init<int, bool>(), py::arg("n_remove") = 1, py::arg("verbose") = false);
 
-    // SpatialRuin
-    py::class_<tree_packing::SpatialRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::SpatialRuin>>(m, "SpatialRuin")
+    // CellRuin
+    py::class_<tree_packing::CellRuin, tree_packing::Optimizer, std::shared_ptr<tree_packing::CellRuin>>(m, "CellRuin")
         .def(py::init<int, bool>(), py::arg("n_remove") = 1, py::arg("verbose") = false);
 
     // RandomRecreate
@@ -269,9 +543,26 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             py::arg("delta") = 0.35f,
             py::arg("verbose") = false);
 
+    // GridCellRecreate
+    py::class_<tree_packing::GridCellRecreate, tree_packing::Optimizer, std::shared_ptr<tree_packing::GridCellRecreate>>(m, "GridCellRecreate")
+        .def(py::init<int, int, int, int, int, bool>(),
+            py::arg("max_recreate") = 1,
+            py::arg("cell_min") = 0,
+            py::arg("cell_max") = 4,
+            py::arg("neighbor_min") = 1,
+            py::arg("neighbor_max") = -1,
+            py::arg("verbose") = false);
+
     // NoiseOptimizer
     py::class_<tree_packing::NoiseOptimizer, tree_packing::Optimizer, std::shared_ptr<tree_packing::NoiseOptimizer>>(m, "NoiseOptimizer")
-        .def(py::init<float, bool>(), py::arg("noise_level") = 0.01f, py::arg("verbose") = false);
+        .def(py::init<float, int, bool>(),
+            py::arg("noise_level") = 0.01f,
+            py::arg("n_change") = 1,
+            py::arg("verbose") = false);
+
+    // RestoreBest
+    py::class_<tree_packing::RestoreBest, tree_packing::Optimizer, std::shared_ptr<tree_packing::RestoreBest>>(m, "RestoreBest")
+        .def(py::init<int, bool>(), py::arg("interval"), py::arg("verbose") = false);
 
     // Chain
     py::class_<tree_packing::Chain, tree_packing::Optimizer, std::shared_ptr<tree_packing::Chain>>(m, "Chain")
@@ -413,9 +704,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         // Run optimization
         for (int i = 0; i < num_iterations; ++i) {
             tree_packing::RNG rng(global_state.split_rng());
-            tree_packing::SolutionEval new_solution;
-            sa.apply(solution_eval, state, global_state, rng, new_solution);
-            solution_eval.copy_from(new_solution);
+            sa.apply(solution_eval, state, global_state, rng);
 
             global_state.maybe_update_best(problem, solution_eval);
             global_state.next();

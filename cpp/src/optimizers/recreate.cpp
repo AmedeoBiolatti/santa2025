@@ -1,5 +1,6 @@
 #include "tree_packing/optimizers/recreate.hpp"
 #include "tree_packing/core/tree.hpp"
+#include "tree_packing/spatial/grid2d.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -17,44 +18,31 @@ RandomRecreate::RandomRecreate(int max_recreate, float box_size, float delta, bo
 }
 
 std::any RandomRecreate::init_state(const SolutionEval& solution) {
+    (void)solution;
     RandomRecreateState state;
     state.iteration = 0;
+    state.indices.reserve(8);
+    state.new_params.reserve(8);
     return state;
 }
 
-void RandomRecreate::get_removed_indices(const TreeParamsSoA& params, std::vector<int>& out) {
-    out.clear();
-    for (size_t i = 0; i < params.size(); ++i) {
-        if (params.is_nan(i)) {
-            out.push_back(static_cast<int>(i));
-        }
-    }
-}
-
 void RandomRecreate::apply(
-    const SolutionEval& solution,
+    SolutionEval& solution,
     std::any& state,
     GlobalState& global_state,
-    RNG& rng,
-    SolutionEval& out
+    RNG& rng
 ) {
-    if (out.solution.revision() != solution.solution.revision()) {
-        out.solution.copy_from(solution.solution);
-    }
-    const auto& params = out.solution.params();
-    float max_abs = out.solution.max_max_abs();
+    float max_abs = solution.solution.max_max_abs();
 
-    // Find removed (NaN) indices
     auto* rec_state = std::any_cast<RandomRecreateState>(&state);
     if (!rec_state) {
         state = init_state(solution);
         rec_state = std::any_cast<RandomRecreateState>(&state);
     }
-    auto& removed = rec_state->removed;
-    get_removed_indices(params, removed);
 
+    // Get removed indices directly from Solution (no copy)
+    const auto& removed = solution.solution.removed_indices();
     if (removed.empty()) {
-        // Nothing to recreate
         rec_state->iteration++;
         return;
     }
@@ -70,36 +58,163 @@ void RandomRecreate::apply(
     // Select indices to recreate (up to max_recreate)
     int n_recreate = std::min(max_recreate_, static_cast<int>(removed.size()));
 
-    // Take first n_recreate removed indices (order doesn't matter)
+    // Copy only the indices we need (not the whole vector)
     auto& indices = rec_state->indices;
-    indices = removed;
-    indices.resize(n_recreate);
+    indices.assign(removed.begin(), removed.begin() + n_recreate);
 
-    // Create new solution with updated params
-    for (int idx : indices) {
+    // Create new params
+    auto& new_params = rec_state->new_params;
+    new_params.resize(static_cast<size_t>(n_recreate));
+    for (int i = 0; i < n_recreate; ++i) {
         TreeParams p{
             rng.uniform(minval, maxval),
             rng.uniform(minval, maxval),
             rng.uniform(-PI, PI)
         };
-        out.solution.set_params(static_cast<size_t>(idx), p);
+        new_params.set(static_cast<size_t>(i), p);
+    }
+
+    // Push insertions to update stack for rollback support
+    auto& stack = global_state.update_stack();
+    for (int idx : indices) {
+        stack.push_insert(idx);
     }
 
     // Evaluate the new solution
-    problem_->eval_inplace(out.solution, out);
+    problem_->insert_and_eval(solution, indices, new_params);
 
     // Update state
     rec_state->iteration++;
 
     if (verbose_) {
         std::cout << "[RandomRecreate] iter=" << rec_state->iteration
-                  << " removed=" << removed.size()
+                  << " removed=" << solution.solution.removed_indices().size()
                   << " recreated=" << n_recreate << "\n";
     }
 }
 
 OptimizerPtr RandomRecreate::clone() const {
     return std::make_unique<RandomRecreate>(*this);
+}
+
+GridCellRecreate::GridCellRecreate(
+    int max_recreate,
+    int cell_min,
+    int cell_max,
+    int neighbor_min,
+    int neighbor_max,
+    bool verbose
+)
+    : max_recreate_(max_recreate)
+    , cell_min_(cell_min)
+    , cell_max_(cell_max)
+    , neighbor_min_(neighbor_min)
+    , neighbor_max_(neighbor_max)
+    , verbose_(verbose)
+{
+    if (max_recreate_ < 1) max_recreate_ = 1;
+    if (cell_min_ < 0) cell_min_ = 0;
+    if (cell_max_ < cell_min_) cell_max_ = cell_min_;
+}
+
+std::any GridCellRecreate::init_state(const SolutionEval& solution) {
+    GridCellRecreateState state;
+    state.iteration = 0;
+    state.indices.reserve(8);
+    state.new_params.reserve(8);
+    int N = solution.solution.grid().grid_N();
+    state.candidate_cells.reserve(static_cast<size_t>(N * N));
+    return state;
+}
+
+void GridCellRecreate::apply(
+    SolutionEval& solution,
+    std::any& state,
+    GlobalState& global_state,
+    RNG& rng
+) {
+    auto* rec_state = std::any_cast<GridCellRecreateState>(&state);
+    if (!rec_state) {
+        state = init_state(solution);
+        rec_state = std::any_cast<GridCellRecreateState>(&state);
+    }
+
+    // Get removed indices directly from Solution (no copy)
+    const auto& removed = solution.solution.removed_indices();
+    if (removed.empty()) {
+        rec_state->iteration++;
+        return;
+    }
+
+    const Grid2D& grid = solution.solution.grid();
+    int n = grid.grid_n();
+
+    auto& candidate_cells = rec_state->candidate_cells;
+    candidate_cells.clear();
+    for (int i = 1; i <= n; ++i) {
+        for (int j = 1; j <= n; ++j) {
+            int count = grid.cell_count(i, j);
+            if (count < cell_min_ || count > cell_max_) {
+                continue;
+            }
+            int neighbor_count = 0;
+            for (const auto& [di, dj] : NEIGHBOR_DELTAS) {
+                neighbor_count += grid.cell_count(i + di, j + dj);
+            }
+            if (neighbor_count < neighbor_min_) {
+                continue;
+            }
+            if (neighbor_max_ >= 0 && neighbor_count > neighbor_max_) {
+                continue;
+            }
+            candidate_cells.emplace_back(i, j);
+        }
+    }
+
+    if (candidate_cells.empty()) {
+        rec_state->iteration++;
+        return;
+    }
+
+    int n_recreate = std::min(max_recreate_, static_cast<int>(removed.size()));
+    // Copy only the indices we need (not the whole vector)
+    auto& indices = rec_state->indices;
+    indices.assign(removed.begin(), removed.begin() + n_recreate);
+
+    auto& new_params = rec_state->new_params;
+    new_params.resize(static_cast<size_t>(n_recreate));
+    for (int k = 0; k < n_recreate; ++k) {
+        int choice = rng.randint(0, static_cast<int>(candidate_cells.size() - 1));
+        auto [ci, cj] = candidate_cells[static_cast<size_t>(choice)];
+        AABB bounds = grid.cell_bounds(ci, cj);
+        TreeParams p{
+            rng.uniform(bounds.min.x, bounds.max.x),
+            rng.uniform(bounds.min.y, bounds.max.y),
+            rng.uniform(-PI, PI)
+        };
+        new_params.set(static_cast<size_t>(k), p);
+    }
+
+    // Push insertions to update stack for rollback support
+    auto& stack = global_state.update_stack();
+    for (int idx : indices) {
+        stack.push_insert(idx);
+    }
+
+    problem_->insert_and_eval(solution, indices, new_params);
+
+    rec_state->iteration++;
+
+    if (verbose_) {
+        std::cout << "[GridCellRecreate] iter=" << rec_state->iteration
+                  << " removed=" << solution.solution.removed_indices().size()
+                  << " recreated=" << n_recreate
+                  << " cells=" << candidate_cells.size() << "\n";
+    }
+}
+
+OptimizerPtr GridCellRecreate::clone() const {
+    return std::make_unique<GridCellRecreate>(*this);
 }
 
 }  // namespace tree_packing
