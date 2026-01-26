@@ -6,7 +6,7 @@
 using namespace tree_packing;
 
 int main(int argc, char** argv) {
-    int num_iterations = 10000000;
+    int num_iterations = 50000000;
     if (argc > 1) {
         try {
             num_iterations = std::stoi(argv[1]);
@@ -17,21 +17,23 @@ int main(int argc, char** argv) {
 
     Problem problem = Problem::create_tree_packing_problem();
 
-    const int num_trees = 199;
-    const float side = 1.0f;
+    const int num_trees = 32;
+    const float side = 6.0f;
     const uint64_t seed = 42;
 
     Solution initial = Solution::init_random(num_trees, side, seed);
     SolutionEval eval = problem.eval(initial);
+
+    std::cout << "[Initial]\n";
+    std::cout << "Objective:       " << eval.objective << "\n";
+    std::cout << "Violation:       " << eval.total_violation() << "\n";
 
     auto make_alns = []() {
         std::vector<OptimizerPtr> ruin_ops;
         std::vector<OptimizerPtr> recreate_ops;
 
         ruin_ops.push_back(std::make_unique<RandomRuin>(1));
-        ruin_ops.push_back(std::make_unique<CellRuin>(2));
         recreate_ops.push_back(std::make_unique<RandomRecreate>(1));
-        recreate_ops.push_back(std::make_unique<RandomRecreate>(2));
 
         return std::make_unique<ALNS>(
             std::move(ruin_ops),
@@ -73,6 +75,8 @@ int main(int argc, char** argv) {
         std::cout << "us/iteration:    " << (duration.count() / static_cast<double>(num_iterations)) << "\n";
         std::cout << "Best feasible:   " << global_state.best_feasible_score() << "\n";
         std::cout << "Best score:      " << global_state.best_score() << "\n";
+        std::cout << "Final objective: " << eval.objective << "\n";
+        std::cout << "Final violation: " << eval.total_violation() << "\n";
     };
 
     {
@@ -95,8 +99,22 @@ int main(int argc, char** argv) {
     }
 
     {
-        NoiseOptimizer noise(0.01f, false);
+        NoiseOptimizer noise(0.01f, 1, false);
         benchmark("NoiseOptimizer", noise);
+    }
+
+    {
+        auto noise = std::make_unique<NoiseOptimizer>(0.01f, 1, false);
+        SimulatedAnnealing sa(
+            std::move(noise),
+            1000.0f,
+            1e-6f,
+            CoolingSchedule::Exponential,
+            0.9995f,
+            -1,
+            false
+        );
+        benchmark("SimulatedAnnealing(Noise)", sa);
     }
 
     return 0;

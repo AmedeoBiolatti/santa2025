@@ -289,17 +289,17 @@ std::pair<float, int> Grid2D::get_max_x(const std::vector<AABB>& aabbs) const {
     float max_x = std::numeric_limits<float>::lowest();
     int idx = -1;
     int i = max_i_;
-    for (int j=min_j_; j<=max_j_; ++j) {
-        if (cell_count(i, j) > 0) {
+    for (int j = min_j_; j <= max_j_; ++j) {
+        int cnt_idx = i * N_ + j;
+        int count = ij2n_[cnt_idx];
+        if (count > 0) {
             int base = cell_index(i, j);
-            for (int s=0; s<capacity_; ++s) {
+            for (int s = 0; s < count; ++s) {
                 int k = ij2k_[base + s];
-                if (k >= 0) {
-                    float x = aabbs[k].max.x;
-                    if (x > max_x) {
-                        max_x = x;
-                        idx = k;
-                    }
+                float x = aabbs[k].max.x;
+                if (x > max_x) {
+                    max_x = x;
+                    idx = k;
                 }
             }
         }
@@ -311,17 +311,17 @@ std::pair<float, int> Grid2D::get_min_x(const std::vector<AABB>& aabbs) const {
     float min_x = std::numeric_limits<float>::max();
     int idx = -1;
     int i = min_i_;
-    for (int j=min_j_; j<=max_j_; ++j) {
-        if (cell_count(i, j) > 0) {
+    for (int j = min_j_; j <= max_j_; ++j) {
+        int cnt_idx = i * N_ + j;
+        int count = ij2n_[cnt_idx];
+        if (count > 0) {
             int base = cell_index(i, j);
-            for (int s=0; s<capacity_; ++s) {
+            for (int s = 0; s < count; ++s) {
                 int k = ij2k_[base + s];
-                if (k >= 0) {
-                    float x = aabbs[k].min.x;
-                    if (x < min_x) {
-                        min_x = x;
-                        idx = k;
-                    }
+                float x = aabbs[k].min.x;
+                if (x < min_x) {
+                    min_x = x;
+                    idx = k;
                 }
             }
         }
@@ -333,17 +333,17 @@ std::pair<float, int> Grid2D::get_max_y(const std::vector<AABB>& aabbs) const {
     float max_y = std::numeric_limits<float>::lowest();
     int idx = -1;
     int j = max_j_;
-    for (int i=min_i_; i<=max_i_; ++i) {
-        if (cell_count(i, j) > 0) {
+    for (int i = min_i_; i <= max_i_; ++i) {
+        int cnt_idx = i * N_ + j;
+        int count = ij2n_[cnt_idx];
+        if (count > 0) {
             int base = cell_index(i, j);
-            for (int s=0; s<capacity_; ++s) {
+            for (int s = 0; s < count; ++s) {
                 int k = ij2k_[base + s];
-                if (k >= 0) {
-                    float y = aabbs[k].max.y;
-                    if (y > max_y) {
-                        max_y = y;
-                        idx = k;
-                    }
+                float y = aabbs[k].max.y;
+                if (y > max_y) {
+                    max_y = y;
+                    idx = k;
                 }
             }
         }
@@ -355,17 +355,17 @@ std::pair<float, int> Grid2D::get_min_y(const std::vector<AABB>& aabbs) const {
     float min_y = std::numeric_limits<float>::max();
     int idx = -1;
     int j = min_j_;
-    for (int i=min_i_; i<=max_i_; ++i) {
-        if (cell_count(i, j) > 0) {
+    for (int i = min_i_; i <= max_i_; ++i) {
+        int cnt_idx = i * N_ + j;
+        int count = ij2n_[cnt_idx];
+        if (count > 0) {
             int base = cell_index(i, j);
-            for (int s=0; s<capacity_; ++s) {
+            for (int s = 0; s < count; ++s) {
                 int k = ij2k_[base + s];
-                if (k >= 0) {
-                    float y = aabbs[k].min.y;
-                    if (y < min_y) {
-                        min_y = y;
-                        idx = k;
-                    }
+                float y = aabbs[k].min.y;
+                if (y < min_y) {
+                    min_y = y;
+                    idx = k;
                 }
             }
         }

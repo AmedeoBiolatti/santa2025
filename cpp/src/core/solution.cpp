@@ -430,13 +430,15 @@ int Solution::update_cache_on_transition(size_t i, bool new_valid) {
 }
 
 void Solution::update_cache_on_insertion_for(size_t i) {
+    TreeParams p = params_.get(i);
+#ifndef NDEBUG
     if (valid_[i]) {
         return;
     }
-    TreeParams p = params_.get(i);
     if (!params_finite(p)) {
         return;
     }
+#endif
     figures_[i] = params_to_figure(p);
     centers_[i] = get_tree_center(p);
     get_tree_normals(p.angle, normals_[i]);
@@ -448,13 +450,12 @@ void Solution::update_cache_on_insertion_for(size_t i) {
     valid_[i] = true;
     reg_sum_int_ += (int)(1000.0f * max_abs_[i]);
     int idx = static_cast<int>(i);
+    --missing_count_;
+
     auto it = std::find(removed_indices_.begin(), removed_indices_.end(), idx);
     if (it != removed_indices_.end()) {
         *it = removed_indices_.back();
         removed_indices_.pop_back();
-    }
-    if (missing_count_ > 0) {
-        --missing_count_;
     }
     if (max_max_abs_idx_ == static_cast<size_t>(-1) || max_abs_[i] > max_max_abs_) {
         max_max_abs_ = max_abs_[i];
