@@ -12,7 +12,6 @@ struct RepeatState {
 };
 
 struct RestoreBestState {
-    SolutionEval backup;
     bool restored{false};
     uint64_t last_iteration{std::numeric_limits<uint64_t>::max()};
 };
@@ -135,9 +134,8 @@ RestoreBest::RestoreBest(int interval, bool verbose)
     if (interval_ < 0) interval_ = 0;
 }
 
-std::any RestoreBest::init_state(const SolutionEval& solution) {
+std::any RestoreBest::init_state([[maybe_unused]] const SolutionEval& solution) {
     RestoreBestState state;
-    state.backup = solution;
     state.restored = false;
     state.last_iteration = std::numeric_limits<uint64_t>::max();
     return state;
@@ -154,16 +152,15 @@ void RestoreBest::apply(
         state = init_state(solution);
         rb_state = std::any_cast<RestoreBestState>(&state);
     }
-    rb_state->backup.copy_from(solution);
     rb_state->restored = false;
 
     uint64_t iteration = global_state.iteration();
     if (interval_ > 0 && rb_state->last_iteration != iteration) {
         rb_state->last_iteration = iteration;
         if ((iteration + 1) % static_cast<uint64_t>(interval_) == 0) {
-            const auto* best = global_state.best_solution();
-            if (best != nullptr) {
-                solution.copy_from(*best);
+            const auto* best_params = global_state.best_params();
+            if (best_params != nullptr && problem_ != nullptr) {
+                problem_->restore_from_params(solution, *best_params);
                 rb_state->restored = true;
                 if (verbose_) {
                     std::cout << "[RestoreBest] restored best\n";

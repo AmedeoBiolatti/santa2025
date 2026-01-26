@@ -504,4 +504,18 @@ void Problem::update_intersection_matrix(
     ::tree_packing::update_intersection_matrix(solution.figures(), matrix, modified_indices);
 }
 
+void Problem::restore_from_params(
+    SolutionEval& eval,
+    const TreeParamsSoA& params
+) const {
+    // Copy params
+    eval.solution.params_ = params;
+
+    // Recompute all derived data
+    eval.solution.recompute_cache();
+
+    // Re-evaluate objective and constraints
+    eval_inplace(eval.solution, eval);
+}
+
 }  // namespace tree_packing

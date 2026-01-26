@@ -46,6 +46,12 @@ public:
         const std::vector<int>& indices
     ) const;
 
+    // Restore solution from params (full re-evaluation)
+    void restore_from_params(
+        SolutionEval& eval,
+        const TreeParamsSoA& params
+    ) const;
+
     // Compute score (objective + penalty * violations + missing penalty)
     [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
         float mu = global_state.mu();

@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include "tree.hpp"
 #include "../spatial/grid2d.hpp"
+#include "../spatial/figure_hash2d.hpp"
 #include <algorithm>
 #include <atomic>
 #include <limits>
@@ -51,6 +52,7 @@ public:
     [[nodiscard]] float max_max_abs() const { return max_max_abs_; }
     [[nodiscard]] size_t max_max_abs_idx() const { return max_max_abs_idx_; }
     [[nodiscard]] const Grid2D& grid() const { return grid_; }
+    [[nodiscard]] const FigureHash2D& figure_hash() const { return figure_hash_; }
     [[nodiscard]] bool is_valid(size_t i) const { return valid_[i]; }
 
     // Update solution with new params for specified indices
@@ -97,6 +99,7 @@ protected:
     std::vector<int> removed_indices_;  // Tracks invalid tree indices (order doesn't matter)
     int missing_count_{0};
     Grid2D grid_;
+    FigureHash2D figure_hash_;
 
     void update_cache_for(size_t i);
     void update_cache_for(size_t i, bool new_valid);

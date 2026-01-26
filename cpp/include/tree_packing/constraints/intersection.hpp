@@ -2,6 +2,7 @@
 
 #include "../core/solution.hpp"
 #include "../spatial/grid2d.hpp"
+#include "../spatial/figure_hash2d.hpp"
 #include <vector>
 #include <set>
 
@@ -41,7 +42,36 @@ public:
         int* out_count = nullptr
     ) const;
 
-    [[nodiscard]] void init() {
+    // ============ Figure Hash Based Methods ============
+
+    // Full evaluation using figure hash (spatial hashing at figure level)
+    [[nodiscard]] float eval_figure_hash(
+        const Solution& solution,
+        SolutionEval::IntersectionMap& map,
+        int* out_count = nullptr
+    ) const;
+
+    // Incremental evaluation using figure hash
+    [[nodiscard]] float eval_update_figure_hash(
+        const Solution& solution,
+        SolutionEval::IntersectionMap& map,
+        const std::vector<int>& modified_indices,
+        float prev_total,
+        int prev_count,
+        int* out_count = nullptr
+    ) const;
+
+    // Incremental removal using figure hash
+    [[nodiscard]] float eval_remove_figure_hash(
+        const Solution& solution,
+        SolutionEval::IntersectionMap& map,
+        const std::vector<int>& removed_indices,
+        float prev_total,
+        int prev_count,
+        int* out_count = nullptr
+    ) const;
+
+    void init() {
         size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(CAPACITY) * 2;
         candidates_.reserve(needed);
         candidates_.resize(needed);
@@ -49,7 +79,6 @@ public:
     }
 
 private:
-    //
     mutable std::vector<Index> candidates_;
     mutable std::set<size_t> modified_;
 

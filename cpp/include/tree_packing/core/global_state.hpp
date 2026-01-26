@@ -42,12 +42,12 @@ public:
     [[nodiscard]] float best_score() const { return best_score_; }
     [[nodiscard]] float best_feasible_score() const { return best_feasible_score_; }
 
-    [[nodiscard]] const SolutionEval* best_solution() const {
-        return best_solution_ ? &(*best_solution_) : nullptr;
+    [[nodiscard]] const TreeParamsSoA* best_params() const {
+        return best_params_ ? &(*best_params_) : nullptr;
     }
 
-    [[nodiscard]] const SolutionEval* best_feasible_solution() const {
-        return best_feasible_solution_ ? &(*best_feasible_solution_) : nullptr;
+    [[nodiscard]] const TreeParamsSoA* best_feasible_params() const {
+        return best_feasible_params_ ? &(*best_feasible_params_) : nullptr;
     }
 
     // Penalty multiplier for violations
@@ -79,8 +79,8 @@ private:
     float best_score_{std::numeric_limits<float>::infinity()};
     float best_feasible_score_{std::numeric_limits<float>::infinity()};
 
-    std::optional<SolutionEval> best_solution_;
-    std::optional<SolutionEval> best_feasible_solution_;
+    std::optional<TreeParamsSoA> best_params_;
+    std::optional<TreeParamsSoA> best_feasible_params_;
 
     float mu_{1e6f};
     float tol_{1e-12f};
