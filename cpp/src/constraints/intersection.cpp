@@ -4,22 +4,35 @@
 #include <algorithm>
 #include <iostream>
 
+#ifdef COUNT_INTERSECTIONS
+#include <atomic>
+static std::atomic<uint64_t> g_triangle_calls{0};
+static std::atomic<uint64_t> g_triangle_positive{0};
+static std::atomic<uint64_t> g_pair_calls{0};
+static std::atomic<uint64_t> g_pair_positive{0};
+
+void print_intersection_stats() {
+    std::cout << "=== Intersection Stats ===\n";
+    std::cout << "Pair calls: " << g_pair_calls.load() << "\n";
+    std::cout << "Pair positive: " << g_pair_positive.load()
+              << " (" << (100.0 * g_pair_positive.load() / std::max(1UL, g_pair_calls.load())) << "%)\n";
+    std::cout << "Triangle calls: " << g_triangle_calls.load() << "\n";
+    std::cout << "Triangle positive: " << g_triangle_positive.load()
+              << " (" << (100.0 * g_triangle_positive.load() / std::max(1UL, g_triangle_calls.load())) << "%)\n";
+}
+#endif
 
 namespace tree_packing {
 namespace {
 
-SolutionEval::IntersectionList& ensure_unique_row(
+SolutionEval::IntersectionList& get_row(
     SolutionEval::IntersectionMap& map,
     size_t idx
 ) {
     if (idx >= map.size()) {
         map.resize(idx + 1);
     }
-    auto& row_ptr = map[idx];
-    if (!row_ptr) {
-        row_ptr = std::make_shared<SolutionEval::IntersectionList>();
-    }
-    return *row_ptr;
+    return map[idx];
 }
 
 void erase_entry_with_back(
@@ -27,12 +40,12 @@ void erase_entry_with_back(
     size_t row_idx,
     size_t entry_idx
 ) {
-    auto& row = ensure_unique_row(map, row_idx);
+    auto& row = get_row(map, row_idx);
     size_t last = row.size() - 1;
     if (entry_idx != last) {
         auto moved = row[last];
         row[entry_idx] = moved;
-        auto& neighbor_row = ensure_unique_row(map, static_cast<size_t>(moved.neighbor));
+        auto& neighbor_row = get_row(map, static_cast<size_t>(moved.neighbor));
         neighbor_row[static_cast<size_t>(moved.back_index)].back_index = static_cast<int>(entry_idx);
     }
     row.pop_back();
@@ -44,8 +57,8 @@ void add_pair(
     size_t b_idx,
     float score
 ) {
-    auto& row_a = ensure_unique_row(map, a_idx);
-    auto& row_b = ensure_unique_row(map, b_idx);
+    auto& row_a = get_row(map, a_idx);
+    auto& row_b = get_row(map, b_idx);
     int a_pos = static_cast<int>(row_a.size());
     int b_pos = static_cast<int>(row_b.size());
     row_a.push_back({static_cast<Index>(b_idx), score, b_pos});
@@ -116,14 +129,27 @@ float IntersectionConstraint::compute_pair_score_from_normals_per_triangle(
     for (int p = 0; p < pair_count; ++p) {
         int i = pair_i[p];
         int j = pair_j[p];
+#ifdef COUNT_INTERSECTIONS
+        ++g_triangle_calls;
+#endif
         float score = triangles_intersection_score_from_normals(
             t0[i], t1[j], n0p[i], n1p[j], EPSILON
         );
         if (score > 0.0f) {
+#ifdef COUNT_INTERSECTIONS
+            ++g_triangle_positive;
+#endif
             total += score;
+            if (total >= 0.15f) {
+                return 0.15f;
+            }
         }
     }
 
+#ifdef COUNT_INTERSECTIONS
+    ++g_pair_calls;
+    if (total > 0.0f) ++g_pair_positive;
+#endif
     return total;
 }
 
@@ -143,12 +169,8 @@ float IntersectionConstraint::eval(
     map.resize(n);
     int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * grid.capacity();
     for (auto& row : map) {
-        if (!row) {
-            row = std::make_shared<SolutionEval::IntersectionList>();
-        } else {
-            row->clear();
-        }
-        row->reserve(reserve_size);
+        row.clear();
+        row.reserve(reserve_size);
     }
 
     float total_violation = 0.0f;
@@ -221,7 +243,7 @@ float IntersectionConstraint::eval_update(
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
         modified_.insert(idx);
 
-        auto& row = ensure_unique_row(map, static_cast<size_t>(idx));
+        auto& row = get_row(map, static_cast<size_t>(idx));
         size_t row_size = row.size();
         for (const auto& entry : row) {
             total -= 2.0f * entry.score;
@@ -277,9 +299,8 @@ float IntersectionConstraint::eval_update(
     // from the true sum due to floating point arithmetic order dependence.
     total = 0.0f;
     for (size_t i = 0; i < map.size(); ++i) {
-        if (!map[i]) continue;
-        for (const auto& entry : *map[i]) {
-            total += entry.score;  // Each pair is stored twice, so just sum all
+        for (const auto& entry : map[i]) {
+            total += entry.score;
         }
     }
 #endif
@@ -310,7 +331,7 @@ float IntersectionConstraint::eval_remove(
     for (int idx : removed_indices) {
         if (idx < 0 || static_cast<size_t>(idx) >= n) continue;
 
-        auto& row = ensure_unique_row(map, static_cast<size_t>(idx));
+        auto& row = get_row(map, static_cast<size_t>(idx));
         size_t row_size = row.size();
         for (const auto& entry : row) {
             total -= 2.0f * entry.score;
@@ -329,8 +350,7 @@ float IntersectionConstraint::eval_remove(
     // Recompute total from map to avoid floating point drift
     total = 0.0f;
     for (size_t i = 0; i < map.size(); ++i) {
-        if (!map[i]) continue;
-        for (const auto& entry : *map[i]) {
+        for (const auto& entry : map[i]) {
             total += entry.score;
         }
     }

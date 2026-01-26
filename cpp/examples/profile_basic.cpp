@@ -2,6 +2,10 @@
 #include <string>
 #include "tree_packing/tree_packing.hpp"
 
+#ifdef COUNT_INTERSECTIONS
+extern void print_intersection_stats();
+#endif
+
 using namespace tree_packing;
 
 int main(int argc, char** argv) {
@@ -61,6 +65,10 @@ int main(int argc, char** argv) {
               << " best_feasible=" << global_state.best_feasible_score()
               << " best=" << global_state.best_score()
               << "\n";
+
+#ifdef COUNT_INTERSECTIONS
+    print_intersection_stats();
+#endif
 
     return 0;
 }

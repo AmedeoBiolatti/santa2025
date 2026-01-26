@@ -117,13 +117,14 @@ struct SolutionEval {
     int intersection_count{0};
 
     // Intersection map (cached for incremental updates)
+    // Stores each pair (i,j) in both directions for O(1) removal
     struct IntersectionEntry {
         Index neighbor{-1};
         float score{0.0f};
-        int back_index{-1};
+        int back_index{-1};  // Index in neighbor's list pointing back
     };
     using IntersectionList = std::vector<IntersectionEntry>;
-    using IntersectionMap = std::vector<std::shared_ptr<IntersectionList>>;
+    using IntersectionMap = std::vector<IntersectionList>;
     IntersectionMap intersection_map;
 
     // Cached bounds for incremental objective updates
@@ -156,10 +157,7 @@ struct SolutionEval {
         min_y_idx = other.min_y_idx;
         max_y_idx = other.max_y_idx;
 
-        if (intersection_map.size() != other.intersection_map.size()) {
-            intersection_map.resize(other.intersection_map.size());
-        }
-        std::copy(other.intersection_map.begin(), other.intersection_map.end(), intersection_map.begin());
+        intersection_map = other.intersection_map;
     }
 
     [[nodiscard]] float total_violation() const {
