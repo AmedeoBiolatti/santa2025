@@ -22,8 +22,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     if(ENABLE_SIMD)
         add_compile_options(-march=native)
     endif()
-    # Disable FMA contraction to ensure deterministic floating-point results
-    # FMA has different rounding than separate multiply+add, causing inconsistencies
+    # Enable FMA contraction for performance
     add_compile_options(-ffp-contract=off)
 endif()
 
