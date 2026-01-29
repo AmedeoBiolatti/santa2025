@@ -8,12 +8,12 @@
 
 namespace tree_packing {
 
+class IntersectionTreeFilter;
+
 // Intersection constraint: penalizes overlapping trees
 class IntersectionConstraint {
 public:
-    IntersectionConstraint() {
-        init();
-    };
+    IntersectionConstraint() { init(); }
 
     // Full evaluation (compute sparse intersection map)
     [[nodiscard]] float eval(
@@ -71,16 +71,16 @@ public:
         int* out_count = nullptr
     ) const;
 
-    void init() {
-        size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(CAPACITY) * 2;
-        candidates_.reserve(needed);
-        candidates_.resize(needed);
-        std::fill(candidates_.begin(), candidates_.end(), static_cast<Index>(-1));
+    void init();
+
+    void set_tree_filter(const IntersectionTreeFilter* filter) {
+        tree_filter_ = filter;
     }
 
 private:
     mutable std::vector<Index> candidates_;
     mutable std::set<size_t> modified_;
+    const IntersectionTreeFilter* tree_filter_{nullptr};
 
     // Compute intersection score between two figures using spatial grid
     [[nodiscard]] float compute_pair_score(
@@ -103,6 +103,9 @@ private:
     ) const;
 
     [[nodiscard]] float compute_pair_score_from_normals_per_triangle(
+        const Solution& solution,
+        size_t idx0,
+        size_t idx1,
         const Figure& f0,
         const Figure& f1,
         const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,

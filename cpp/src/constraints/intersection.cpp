@@ -1,6 +1,9 @@
 #include "tree_packing/constraints/intersection.hpp"
 #include "tree_packing/geometry/sat.hpp"
 #include "tree_packing/core/tree.hpp"
+#ifdef USE_INTERSECTION_TREE_FILTER
+#include "tree_packing/constraints/intersection_tree_filter.hpp"
+#endif
 #include <algorithm>
 #include <iostream>
 
@@ -67,7 +70,21 @@ void add_pair(
 
 }  // namespace
 
+void IntersectionConstraint::init() {
+    size_t needed = NEIGHBOR_DELTAS.size() * static_cast<size_t>(CAPACITY) * 2;
+    candidates_.reserve(needed);
+    candidates_.resize(needed);
+    std::fill(candidates_.begin(), candidates_.end(), static_cast<Index>(-1));
+#ifdef USE_INTERSECTION_TREE_FILTER
+    static const IntersectionTreeFilter kDefaultTreeFilter;
+    tree_filter_ = &kDefaultTreeFilter;
+#endif
+}
+
 float IntersectionConstraint::compute_pair_score_from_normals_per_triangle(
+    const Solution& solution,
+    size_t idx0,
+    size_t idx1,
     const Figure& f0,
     const Figure& f1,
     const std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES>& n0,
@@ -98,51 +115,86 @@ float IntersectionConstraint::compute_pair_score_from_normals_per_triangle(
     }
 
     float total = 0.0f;
-    int i_list[TREE_NUM_TRIANGLES];
-    int j_list[TREE_NUM_TRIANGLES];
-    int i_count = 0;
-    int j_count = 0;
-    for (size_t i = 0; i < TREE_NUM_TRIANGLES; ++i) {
-        if (a0[i].intersects(aabb1)) {
-            i_list[i_count++] = static_cast<int>(i);
-        }
-    }
-    for (size_t j = 0; j < TREE_NUM_TRIANGLES; ++j) {
-        if (a1[j].intersects(aabb0)) {
-            j_list[j_count++] = static_cast<int>(j);
-        }
-    }
-    int pair_i[TREE_NUM_TRIANGLES * TREE_NUM_TRIANGLES];
-    int pair_j[TREE_NUM_TRIANGLES * TREE_NUM_TRIANGLES];
-    int pair_count = 0;
-    for (int ii = 0; ii < i_count; ++ii) {
-        int i = i_list[ii];
-        for (int jj = 0; jj < j_count; ++jj) {
-            int j = j_list[jj];
+#ifdef USE_INTERSECTION_TREE_FILTER
+    if (tree_filter_ && tree_filter_->ready()) {
+        const auto* pairs = tree_filter_->triangle_pairs_for(solution, idx0, idx1);
+        for (const auto& pair : *pairs) {
+            int i = pair.first;
+            int j = pair.second;
+            if (!a0[i].intersects(aabb1)) {
+                continue;
+            }
+            if (!a1[j].intersects(aabb0)) {
+                continue;
+            }
             if (!a0[i].intersects(a1[j])) {
                 continue;
             }
-            pair_i[pair_count] = i;
-            pair_j[pair_count] = j;
-            ++pair_count;
+#ifdef COUNT_INTERSECTIONS
+            ++g_triangle_calls;
+#endif
+            float score = triangles_intersection_score_from_normals(
+                t0[i], t1[j], n0p[i], n1p[j], EPSILON
+            );
+            if (score > 0.0f) {
+#ifdef COUNT_INTERSECTIONS
+                ++g_triangle_positive;
+#endif
+                total += score;
+                if (total >= 0.15f) {
+                    return 0.15f;
+                }
+            }
         }
-    }
-    for (int p = 0; p < pair_count; ++p) {
-        int i = pair_i[p];
-        int j = pair_j[p];
-#ifdef COUNT_INTERSECTIONS
-        ++g_triangle_calls;
+    } else
 #endif
-        float score = triangles_intersection_score_from_normals(
-            t0[i], t1[j], n0p[i], n1p[j], EPSILON
-        );
-        if (score > 0.0f) {
+    {
+        int i_list[TREE_NUM_TRIANGLES];
+        int j_list[TREE_NUM_TRIANGLES];
+        int i_count = 0;
+        int j_count = 0;
+        for (size_t i = 0; i < TREE_NUM_TRIANGLES; ++i) {
+            if (a0[i].intersects(aabb1)) {
+                i_list[i_count++] = static_cast<int>(i);
+            }
+        }
+        for (size_t j = 0; j < TREE_NUM_TRIANGLES; ++j) {
+            if (a1[j].intersects(aabb0)) {
+                j_list[j_count++] = static_cast<int>(j);
+            }
+        }
+        int pair_i[TREE_NUM_TRIANGLES * TREE_NUM_TRIANGLES];
+        int pair_j[TREE_NUM_TRIANGLES * TREE_NUM_TRIANGLES];
+        int pair_count = 0;
+        for (int ii = 0; ii < i_count; ++ii) {
+            int i = i_list[ii];
+            for (int jj = 0; jj < j_count; ++jj) {
+                int j = j_list[jj];
+                if (!a0[i].intersects(a1[j])) {
+                    continue;
+                }
+                pair_i[pair_count] = i;
+                pair_j[pair_count] = j;
+                ++pair_count;
+            }
+        }
+        for (int p = 0; p < pair_count; ++p) {
+            int i = pair_i[p];
+            int j = pair_j[p];
 #ifdef COUNT_INTERSECTIONS
-            ++g_triangle_positive;
+            ++g_triangle_calls;
 #endif
-            total += score;
-            if (total >= 0.15f) {
-                return 0.15f;
+            float score = triangles_intersection_score_from_normals(
+                t0[i], t1[j], n0p[i], n1p[j], EPSILON
+            );
+            if (score > 0.0f) {
+#ifdef COUNT_INTERSECTIONS
+                ++g_triangle_positive;
+#endif
+                total += score;
+                if (total >= 0.15f) {
+                    return 0.15f;
+                }
             }
         }
     }
@@ -197,6 +249,9 @@ float IntersectionConstraint::eval(
             if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
 
             float score = compute_pair_score_from_normals_per_triangle(
+                solution,
+                i,
+                static_cast<size_t>(c_idx),
                 figures[i],
                 figures[c_idx],
                 normals[i],
@@ -282,6 +337,9 @@ float IntersectionConstraint::eval_update(
             if (c_idx > idx && modified_.contains(c_idx)) continue;
 
             float score = compute_pair_score_from_normals_per_triangle(
+                solution,
+                static_cast<size_t>(idx),
+                static_cast<size_t>(c_idx),
                 figures[idx],
                 figures[c_idx],
                 normals[idx],
@@ -419,6 +477,9 @@ float IntersectionConstraint::eval_figure_hash(
             if (!solution.is_valid(static_cast<size_t>(c_idx))) continue;
 
             float score = compute_pair_score_from_normals_per_triangle(
+                solution,
+                i,
+                static_cast<size_t>(c_idx),
                 figures[i],
                 figures[c_idx],
                 normals[i],
@@ -503,6 +564,9 @@ float IntersectionConstraint::eval_update_figure_hash(
             if (c_idx > idx && modified_.contains(c_idx)) continue;
 
             float score = compute_pair_score_from_normals_per_triangle(
+                solution,
+                static_cast<size_t>(idx),
+                static_cast<size_t>(c_idx),
                 figures[idx],
                 figures[c_idx],
                 normals[idx],

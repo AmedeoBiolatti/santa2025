@@ -20,6 +20,11 @@ struct RandomChoiceState {
     std::vector<std::any> states;
     int last_idx{-1};
 };
+
+struct AlternateState {
+    std::vector<std::any> states;
+    size_t current_idx{0};
+};
 }  // namespace
 
 // Chain implementation
@@ -249,6 +254,178 @@ OptimizerPtr RandomChoice::clone() const {
         clones.push_back(opt->clone());
     }
     return std::make_unique<RandomChoice>(std::move(clones), probabilities_, verbose_);
+}
+
+// Alternate implementation
+Alternate::Alternate(std::vector<OptimizerPtr> optimizers, bool verbose)
+    : optimizers_(std::move(optimizers))
+    , verbose_(verbose)
+{}
+
+void Alternate::set_problem(Problem* problem) {
+    Optimizer::set_problem(problem);
+    for (auto& opt : optimizers_) {
+        opt->set_problem(problem);
+    }
+}
+
+std::any Alternate::init_state(const SolutionEval& solution) {
+    AlternateState state;
+    for (auto& opt : optimizers_) {
+        state.states.push_back(opt->init_state(solution));
+    }
+    state.current_idx = 0;
+    return state;
+}
+
+void Alternate::apply(
+    SolutionEval& solution,
+    std::any& state,
+    GlobalState& global_state,
+    RNG& rng
+) {
+    if (optimizers_.empty()) return;
+
+    auto* alt_state = std::any_cast<AlternateState>(&state);
+    if (!alt_state) {
+        state = init_state(solution);
+        alt_state = std::any_cast<AlternateState>(&state);
+    }
+
+    // Get current optimizer index
+    size_t idx = alt_state->current_idx;
+
+    // Apply current optimizer
+    RNG step_rng = rng.split();
+    optimizers_[idx]->apply(solution, alt_state->states[idx], global_state, step_rng);
+
+    if (verbose_) {
+        std::cout << "[Alternate] idx=" << idx << "\n";
+    }
+
+    // Move to next optimizer (wrap around)
+    alt_state->current_idx = (idx + 1) % optimizers_.size();
+}
+
+OptimizerPtr Alternate::clone() const {
+    std::vector<OptimizerPtr> clones;
+    clones.reserve(optimizers_.size());
+    for (const auto& opt : optimizers_) {
+        clones.push_back(opt->clone());
+    }
+    return std::make_unique<Alternate>(std::move(clones), verbose_);
+}
+
+// =============================================================================
+// Conditional implementation
+// =============================================================================
+
+namespace {
+struct ConditionalState {
+    std::any inner_state;
+    bool last_applied{false};
+};
+}  // namespace
+
+Conditional::Conditional(
+    OptimizerPtr optimizer,
+    uint64_t every_n,
+    uint64_t min_iters_since_improvement,
+    uint64_t min_iters_since_feasible_improvement,
+    ConditionFn custom_condition,
+    bool verbose
+)
+    : optimizer_(std::move(optimizer))
+    , every_n_(every_n)
+    , min_iters_since_improvement_(min_iters_since_improvement)
+    , min_iters_since_feasible_improvement_(min_iters_since_feasible_improvement)
+    , custom_condition_(std::move(custom_condition))
+    , verbose_(verbose)
+{}
+
+void Conditional::set_problem(Problem* problem) {
+    Optimizer::set_problem(problem);
+    optimizer_->set_problem(problem);
+}
+
+std::any Conditional::init_state(const SolutionEval& solution) {
+    ConditionalState state;
+    state.inner_state = optimizer_->init_state(solution);
+    state.last_applied = false;
+    return state;
+}
+
+bool Conditional::check_conditions(
+    const SolutionEval& solution,
+    const std::any& state,
+    const GlobalState& global_state
+) const {
+    // Check every_n condition (if enabled)
+    if (every_n_ > 0) {
+        if (global_state.iteration() % every_n_ != 0) {
+            return false;
+        }
+    }
+
+    // Check min_iters_since_improvement condition (if enabled)
+    if (min_iters_since_improvement_ > 0) {
+        if (global_state.iters_since_improvement() < min_iters_since_improvement_) {
+            return false;
+        }
+    }
+
+    // Check min_iters_since_feasible_improvement condition (if enabled)
+    if (min_iters_since_feasible_improvement_ > 0) {
+        if (global_state.iters_since_feasible_improvement() < min_iters_since_feasible_improvement_) {
+            return false;
+        }
+    }
+
+    // Check custom condition (if provided)
+    if (custom_condition_) {
+        if (!custom_condition_(solution, state, global_state)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void Conditional::apply(
+    SolutionEval& solution,
+    std::any& state,
+    GlobalState& global_state,
+    RNG& rng
+) {
+    auto* cond_state = std::any_cast<ConditionalState>(&state);
+    if (!cond_state) {
+        state = init_state(solution);
+        cond_state = std::any_cast<ConditionalState>(&state);
+    }
+
+    bool should_apply = check_conditions(solution, cond_state->inner_state, global_state);
+    cond_state->last_applied = should_apply;
+
+    if (should_apply) {
+        RNG step_rng = rng.split();
+        optimizer_->apply(solution, cond_state->inner_state, global_state, step_rng);
+        if (verbose_) {
+            std::cout << "[Conditional] applied at iter=" << global_state.iteration() << "\n";
+        }
+    } else if (verbose_) {
+        std::cout << "[Conditional] skipped at iter=" << global_state.iteration() << "\n";
+    }
+}
+
+OptimizerPtr Conditional::clone() const {
+    return std::make_unique<Conditional>(
+        optimizer_->clone(),
+        every_n_,
+        min_iters_since_improvement_,
+        min_iters_since_feasible_improvement_,
+        custom_condition_,
+        verbose_
+    );
 }
 
 }  // namespace tree_packing

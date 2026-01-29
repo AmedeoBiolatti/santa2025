@@ -53,6 +53,7 @@ void GlobalState::maybe_update_best(const Problem& problem, const SolutionEval& 
     // Update best feasible (only copy params)
     if (is_feasible && score < best_feasible_score_) {
         best_feasible_score_ = score;
+        best_feasible_objective_ = solution.objective;
         best_feasible_params_ = solution.solution.params();
         iters_since_feasible_improvement_ = 0;
     }

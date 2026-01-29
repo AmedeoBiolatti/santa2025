@@ -36,27 +36,42 @@ void NoiseOptimizer::apply(
         return;
     }
 
-    auto& indices = noise_state->indices;
-    indices.clear();
-    indices.reserve(n);
-    for (size_t i = 0; i < n; ++i) {
-        if (solution.solution.is_valid(i)) {
-            indices.push_back(static_cast<int>(i));
-        }
-    }
-    if (indices.empty()) {
+    int n_valid = static_cast<int>(n) - solution.solution.n_missing();
+    if (n_valid <= 0) {
         return;
     }
     int k = n_change_;
     if (k <= 0) {
         return;
     }
-    if (k > static_cast<int>(indices.size())) {
-        k = static_cast<int>(indices.size());
+    if (k > n_valid) {
+        k = n_valid;
     }
 
     auto& selected = noise_state->selected;
-    rng.choice(static_cast<int>(indices.size()), k, selected);
+    selected.clear();
+    selected.reserve(static_cast<size_t>(k));
+
+    // Use rejection sampling O(k) instead of permutation O(n)
+    int max_attempts = k * 10 + 20;  // Expected ~k attempts when all valid
+    int attempts = 0;
+    while (static_cast<int>(selected.size()) < k && attempts < max_attempts) {
+        int idx = rng.randint(0, static_cast<int>(n) - 1);
+        if (solution.solution.is_valid(static_cast<size_t>(idx))) {
+            bool dup = false;
+            for (int s : selected) {
+                if (s == idx) { dup = true; break; }
+            }
+            if (!dup) {
+                selected.push_back(idx);
+            }
+        }
+        ++attempts;
+    }
+    if (selected.empty()) {
+        return;
+    }
+    k = static_cast<int>(selected.size());
 
     auto& last_indices = noise_state->last_indices;
     last_indices.clear();
@@ -67,7 +82,7 @@ void NoiseOptimizer::apply(
     auto& stack = global_state.update_stack();
 
     for (int i = 0; i < k; ++i) {
-        int idx = indices[static_cast<size_t>(selected[static_cast<size_t>(i)])];
+        int idx = selected[static_cast<size_t>(i)];
         TreeParams p = solution.solution.get_params(static_cast<size_t>(idx));
 
         // Push the old params to the update stack

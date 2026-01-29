@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 #include <array>
+#include <utility>
 
 namespace tree_packing {
 
@@ -31,6 +32,15 @@ constexpr std::array<std::array<Vec2, 3>, TREE_NUM_TRIANGLES> TREE_NORMALS = {{
     {Vec2{-0.0f, -1.0f},
      Vec2{1.0f, 0.0f},
      Vec2{-0.8f, 0.6f}}
+}};
+
+constexpr std::array<std::pair<int, int>, 5> CONVEX_HULL_INDEXES = {{
+    // triangle id, vertex id
+    {0, 0},
+    {2, 0},
+    {2, 2},
+    {3, 1},
+    {3, 2},
 }};
 
 // Triangles centers and radius
@@ -100,7 +110,11 @@ constexpr float THR2 = THR * THR;
 // Compute AABB for a figure
 [[nodiscard]] inline AABB compute_aabb(const Figure& fig) {
     AABB aabb;
-    aabb.expand(fig);
+    for (const auto& [ti, vi] : CONVEX_HULL_INDEXES) {
+        const auto& tri = fig[static_cast<size_t>(ti)];
+        const Vec2& v = (vi == 0) ? tri.v0 : (vi == 1) ? tri.v1 : tri.v2;
+        aabb.expand(v);
+    }
     return aabb;
 }
 

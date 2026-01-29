@@ -5,6 +5,7 @@
 #include <any>
 
 #include "tree_packing/tree_packing.hpp"
+#include "tree_packing/constraints/intersection_tree_filter.hpp"
 
 namespace py = pybind11;
 
@@ -210,6 +211,25 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         return arr;
     });
 
+    m.def("triangle_pair_intersection_scores", [](
+        const tree_packing::TreeParams& a,
+        const tree_packing::TreeParams& b,
+        float eps
+    ) {
+        constexpr py::ssize_t t = static_cast<py::ssize_t>(tree_packing::TREE_NUM_TRIANGLES);
+        py::array_t<float> arr({t, t});
+        auto buf = arr.mutable_unchecked<2>();
+
+        const auto scores = tree_packing::triangle_pair_intersection_scores(a, b, eps);
+        for (py::ssize_t i = 0; i < t; ++i) {
+            for (py::ssize_t j = 0; j < t; ++j) {
+                buf(i, j) = scores[static_cast<size_t>(i)][static_cast<size_t>(j)];
+            }
+        }
+        return arr;
+    }, py::arg("a"), py::arg("b"), py::arg("eps") = tree_packing::EPSILON,
+       "Return a (5, 5) numpy array of per-triangle intersection scores.");
+
     // Solution
     py::class_<tree_packing::Solution>(m, "Solution")
         .def(py::init<>())
@@ -362,6 +382,60 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             return py::make_tuple(positions, angles);
         }, "Get parameters as numpy arrays. Returns (positions, angles) where positions is (N, 2) and angles is (N,)");
 
+    // IntersectionTreeFilter
+    py::class_<tree_packing::IntersectionTreeFilter>(m, "IntersectionTreeFilter")
+        .def(py::init<>())
+        .def("ready", &tree_packing::IntersectionTreeFilter::ready)
+        .def("triangle_pairs_for", [](
+            const tree_packing::IntersectionTreeFilter& self,
+            const tree_packing::Solution& solution,
+            size_t idx_a,
+            size_t idx_b
+        ) {
+            py::list out;
+            const auto* pairs = self.triangle_pairs_for(solution, idx_a, idx_b);
+            if (!pairs) {
+                return out;
+            }
+            for (const auto& pair : *pairs) {
+                out.append(py::make_tuple(pair.first, pair.second));
+            }
+            return out;
+        }, py::arg("solution"), py::arg("idx_a"), py::arg("idx_b"))
+        .def("leaf_index_for", &tree_packing::IntersectionTreeFilter::leaf_index_for,
+             py::arg("solution"), py::arg("idx_a"), py::arg("idx_b"))
+        .def("leaf_pred_for", [](
+            const tree_packing::IntersectionTreeFilter& self,
+            const tree_packing::Solution& solution,
+            size_t idx_a,
+            size_t idx_b
+        ) {
+            std::array<uint8_t, 16> pred{};
+            int leaf_idx = -1;
+            bool ok = self.leaf_pred_for(solution, idx_a, idx_b, pred, &leaf_idx);
+            py::array_t<uint8_t> arr({static_cast<py::ssize_t>(pred.size())});
+            auto buf = arr.mutable_unchecked<1>();
+            for (py::ssize_t i = 0; i < static_cast<py::ssize_t>(pred.size()); ++i) {
+                buf(i) = pred[static_cast<size_t>(i)];
+            }
+            return py::make_tuple(ok, leaf_idx, arr);
+        }, py::arg("solution"), py::arg("idx_a"), py::arg("idx_b"))
+        .def("features_for", [](
+            const tree_packing::IntersectionTreeFilter& self,
+            const tree_packing::Solution& solution,
+            size_t idx_a,
+            size_t idx_b
+        ) {
+            std::array<float, 10> feat{};
+            bool ok = self.features_for(solution, idx_a, idx_b, feat);
+            py::array_t<float> arr({static_cast<py::ssize_t>(feat.size())});
+            auto buf = arr.mutable_unchecked<1>();
+            for (py::ssize_t i = 0; i < static_cast<py::ssize_t>(feat.size()); ++i) {
+                buf(i) = feat[static_cast<size_t>(i)];
+            }
+            return py::make_tuple(ok, arr);
+        }, py::arg("solution"), py::arg("idx_a"), py::arg("idx_b"));
+
     // SolutionEval
     py::class_<tree_packing::SolutionEval>(m, "SolutionEval")
         .def(py::init<>())
@@ -405,6 +479,15 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("n_missing", &tree_packing::SolutionEval::n_missing)
         .def("reg", &tree_packing::SolutionEval::reg);
 
+    // ConstraintPenaltyType enum
+    py::enum_<tree_packing::ConstraintPenaltyType>(m, "ConstraintPenaltyType")
+        .value("Linear", tree_packing::ConstraintPenaltyType::Linear)
+        .value("Quadratic", tree_packing::ConstraintPenaltyType::Quadratic)
+        .value("Tolerant", tree_packing::ConstraintPenaltyType::Tolerant)
+        .value("LogBarrier", tree_packing::ConstraintPenaltyType::LogBarrier)
+        .value("Exponential", tree_packing::ConstraintPenaltyType::Exponential)
+        .export_values();
+
     // Problem
     py::class_<tree_packing::Problem>(m, "Problem")
         .def(py::init<>())
@@ -414,7 +497,53 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("score", &tree_packing::Problem::score)
         .def("objective", &tree_packing::Problem::objective)
         .def("min_pos", &tree_packing::Problem::min_pos)
-        .def("max_pos", &tree_packing::Problem::max_pos);
+        .def("max_pos", &tree_packing::Problem::max_pos)
+        .def("update_and_eval", &tree_packing::Problem::update_and_eval,
+            py::arg("eval"), py::arg("indices"), py::arg("new_params"),
+            "Update solution params in-place and evaluate objective/constraints.")
+        // Constraint penalty settings
+        .def("set_constraint_penalty_type", [](tree_packing::Problem& self, py::object type_obj) {
+            if (py::isinstance<py::str>(type_obj)) {
+                std::string s = type_obj.cast<std::string>();
+                if (s == "Linear" || s == "linear") {
+                    self.set_constraint_penalty_type(tree_packing::ConstraintPenaltyType::Linear);
+                } else if (s == "Quadratic" || s == "quadratic") {
+                    self.set_constraint_penalty_type(tree_packing::ConstraintPenaltyType::Quadratic);
+                } else if (s == "Tolerant" || s == "tolerant") {
+                    self.set_constraint_penalty_type(tree_packing::ConstraintPenaltyType::Tolerant);
+                } else if (s == "LogBarrier" || s == "logbarrier" || s == "log_barrier") {
+                    self.set_constraint_penalty_type(tree_packing::ConstraintPenaltyType::LogBarrier);
+                } else if (s == "Exponential" || s == "exponential") {
+                    self.set_constraint_penalty_type(tree_packing::ConstraintPenaltyType::Exponential);
+                } else {
+                    throw std::invalid_argument("Unknown constraint penalty type: " + s);
+                }
+            } else {
+                self.set_constraint_penalty_type(type_obj.cast<tree_packing::ConstraintPenaltyType>());
+            }
+        }, py::arg("type"), "Set constraint penalty type (Linear, Quadratic, Tolerant, LogBarrier, Exponential)")
+        .def("set_constraint_tolerance", &tree_packing::Problem::set_constraint_tolerance,
+            py::arg("tolerance"), "Set tolerance for Tolerant/LogBarrier penalty types")
+        .def("set_constraint_mu_low", &tree_packing::Problem::set_constraint_mu_low,
+            py::arg("mu_low"), "Set low penalty multiplier for Tolerant type (when violation < tolerance)")
+        .def("set_constraint_exp_scale", &tree_packing::Problem::set_constraint_exp_scale,
+            py::arg("scale"), "Set scale for Exponential penalty type")
+        .def("constraint_penalty_type", &tree_packing::Problem::constraint_penalty_type)
+        .def("constraint_tolerance", &tree_packing::Problem::constraint_tolerance)
+        .def("constraint_mu_low", &tree_packing::Problem::constraint_mu_low)
+        .def("constraint_exp_scale", &tree_packing::Problem::constraint_exp_scale)
+        // Objective ceiling settings
+        .def("set_objective_ceiling", &tree_packing::Problem::set_objective_ceiling,
+            py::arg("ceiling"), "Set objective ceiling directly")
+        .def("set_objective_ceiling_delta", &tree_packing::Problem::set_objective_ceiling_delta,
+            py::arg("delta"), "Set objective ceiling as best_feasible + delta")
+        .def("set_objective_ceiling_mu", &tree_packing::Problem::set_objective_ceiling_mu,
+            py::arg("mu"), "Set penalty multiplier for exceeding ceiling")
+        .def("objective_ceiling", &tree_packing::Problem::objective_ceiling)
+        .def("objective_ceiling_delta", &tree_packing::Problem::objective_ceiling_delta)
+        .def("objective_ceiling_mu", &tree_packing::Problem::objective_ceiling_mu)
+        .def("effective_ceiling", &tree_packing::Problem::effective_ceiling,
+            py::arg("global_state"), "Get effective ceiling value given current global state");
 
     // GlobalState
     py::class_<tree_packing::GlobalState>(m, "GlobalState")
@@ -427,6 +556,7 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
         .def("iters_since_feasible_improvement", &tree_packing::GlobalState::iters_since_feasible_improvement)
         .def("best_score", &tree_packing::GlobalState::best_score)
         .def("best_feasible_score", &tree_packing::GlobalState::best_feasible_score)
+        .def("best_feasible_objective", &tree_packing::GlobalState::best_feasible_objective)
         .def("best_params", [](const tree_packing::GlobalState& self) -> py::object {
             const auto* best = self.best_params();
             if (!best) {
@@ -560,6 +690,27 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             py::arg("n_change") = 1,
             py::arg("verbose") = false);
 
+    // SqueezeOptimizer
+    py::class_<tree_packing::SqueezeOptimizer, tree_packing::Optimizer, std::shared_ptr<tree_packing::SqueezeOptimizer>>(m, "SqueezeOptimizer")
+        .def(py::init<float, float, int, int, bool>(),
+            py::arg("min_scale") = 0.05f,
+            py::arg("shrink") = 0.92f,
+            py::arg("bisect_iters") = 18,
+            py::arg("axis_rounds") = 3,
+            py::arg("verbose") = false);
+
+    // CompactionOptimizer
+    py::class_<tree_packing::CompactionOptimizer, tree_packing::Optimizer, std::shared_ptr<tree_packing::CompactionOptimizer>>(m, "CompactionOptimizer")
+        .def(py::init<int, bool>(),
+            py::arg("iters_per_tree") = 8,
+            py::arg("verbose") = false);
+
+    // LocalSearchOptimizer
+    py::class_<tree_packing::LocalSearchOptimizer, tree_packing::Optimizer, std::shared_ptr<tree_packing::LocalSearchOptimizer>>(m, "LocalSearchOptimizer")
+        .def(py::init<int, bool>(),
+            py::arg("iters_per_tree") = 18,
+            py::arg("verbose") = false);
+
     // RestoreBest
     py::class_<tree_packing::RestoreBest, tree_packing::Optimizer, std::shared_ptr<tree_packing::RestoreBest>>(m, "RestoreBest")
         .def(py::init<int, bool>(), py::arg("interval"), py::arg("verbose") = false);
@@ -577,6 +728,23 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             }
 
             return std::make_shared<tree_packing::Chain>(std::move(optimizer_ptrs), verbose);
+        }),
+            py::arg("optimizers"),
+            py::arg("verbose") = false);
+
+    // Alternate
+    py::class_<tree_packing::Alternate, tree_packing::Optimizer, std::shared_ptr<tree_packing::Alternate>>(m, "Alternate")
+        .def(py::init([](
+            std::vector<std::shared_ptr<tree_packing::Optimizer>> optimizers,
+            bool verbose
+        ) {
+            std::vector<tree_packing::OptimizerPtr> optimizer_ptrs;
+            optimizer_ptrs.reserve(optimizers.size());
+            for (auto& op : optimizers) {
+                optimizer_ptrs.push_back(clone_optimizer(op));
+            }
+
+            return std::make_shared<tree_packing::Alternate>(std::move(optimizer_ptrs), verbose);
         }),
             py::arg("optimizers"),
             py::arg("verbose") = false);
@@ -657,6 +825,582 @@ PYBIND11_MODULE(tree_packing_cpp, m) {
             py::arg("cooling_rate") = 0.995f,
             py::arg("patience") = -1,
             py::arg("verbose") = false);
+
+    // Conditional: applies optimizer only when ALL conditions are met
+    py::class_<tree_packing::Conditional, tree_packing::Optimizer, std::shared_ptr<tree_packing::Conditional>>(m, "Conditional")
+        .def(py::init([](
+            std::shared_ptr<tree_packing::Optimizer> inner_optimizer,
+            uint64_t every_n,
+            uint64_t min_iters_since_improvement,
+            uint64_t min_iters_since_feasible_improvement,
+            bool verbose
+        ) {
+            tree_packing::OptimizerPtr inner = clone_optimizer(inner_optimizer);
+            return std::make_shared<tree_packing::Conditional>(
+                std::move(inner),
+                every_n,
+                min_iters_since_improvement,
+                min_iters_since_feasible_improvement,
+                nullptr,  // custom_condition not exposed to Python
+                verbose
+            );
+        }),
+            py::arg("inner_optimizer"),
+            py::arg("every_n") = 0,
+            py::arg("min_iters_since_improvement") = 0,
+            py::arg("min_iters_since_feasible_improvement") = 0,
+            py::arg("verbose") = false,
+            R"doc(
+            Conditional meta-optimizer that applies inner optimizer only when ALL conditions are met.
+
+            All conditions use logical AND - the optimizer runs only if all enabled conditions are true.
+            Set a condition to 0 to disable it.
+
+            Args:
+                inner_optimizer: The optimizer to conditionally apply.
+                every_n: Run when iteration % every_n == 0 (0 = disabled).
+                min_iters_since_improvement: Run when iters_since_improvement >= this value (0 = disabled).
+                min_iters_since_feasible_improvement: Run when iters_since_feasible_improvement >= this value (0 = disabled).
+                verbose: Print debug messages.
+
+            Examples:
+                # Run expensive optimizer every 100 iterations
+                opt = Conditional(expensive_opt, every_n=100)
+
+                # Run diversification when stuck for 50 iterations
+                opt = Conditional(diversify_opt, min_iters_since_improvement=50)
+
+                # Run every 10 iterations AND when stuck for 20 iterations
+                opt = Conditional(opt, every_n=10, min_iters_since_improvement=20)
+            )doc"
+        )
+        .def_property_readonly("every_n", &tree_packing::Conditional::every_n)
+        .def_property_readonly("min_iters_since_improvement", &tree_packing::Conditional::min_iters_since_improvement)
+        .def_property_readonly("min_iters_since_feasible_improvement", &tree_packing::Conditional::min_iters_since_feasible_improvement);
+
+    // =========================================================================
+    // Solvers
+    // =========================================================================
+
+    // SolverResult
+    py::class_<tree_packing::SolverResult>(m, "SolverResult")
+        .def(py::init<>())
+        .def_readwrite("params", &tree_packing::SolverResult::params)
+        .def_readwrite("start_f", &tree_packing::SolverResult::start_f)
+        .def_readwrite("start_g", &tree_packing::SolverResult::start_g)
+        .def_readwrite("final_f", &tree_packing::SolverResult::final_f)
+        .def_readwrite("final_g", &tree_packing::SolverResult::final_g);
+
+    // Solver base class
+    py::class_<tree_packing::Solver, std::shared_ptr<tree_packing::Solver>>(m, "Solver")
+        .def("solve", [](
+            tree_packing::Solver& self,
+            const tree_packing::SolutionEval& eval,
+            std::vector<int> indices,
+            tree_packing::RNG& rng
+        ) {
+            return self.solve(eval, indices, rng);
+        }, py::arg("eval"), py::arg("indices"), py::arg("rng"))
+        .def("solve_single", [](
+            tree_packing::Solver& self,
+            const tree_packing::SolutionEval& eval,
+            int index,
+            tree_packing::RNG& rng
+        ) {
+            return self.solve_single(eval, index, rng);
+        }, py::arg("eval"), py::arg("index"), py::arg("rng"))
+        .def("set_problem", [](tree_packing::Solver& self, tree_packing::Problem& problem) {
+            self.set_problem(&problem);
+        }, py::arg("problem"))
+        .def("min_pos", &tree_packing::Solver::min_pos)
+        .def("max_pos", &tree_packing::Solver::max_pos)
+        .def("set_bounds", &tree_packing::Solver::set_bounds,
+            py::arg("min_pos"), py::arg("max_pos"));
+
+    // ParticleSwarmSolver::ObjectiveType enum
+    py::enum_<tree_packing::ParticleSwarmSolver::ObjectiveType>(m, "PSOObjectiveType")
+        .value("Distance", tree_packing::ParticleSwarmSolver::ObjectiveType::Distance)
+        .value("Linf", tree_packing::ParticleSwarmSolver::ObjectiveType::Linf)
+        .value("Zero", tree_packing::ParticleSwarmSolver::ObjectiveType::Zero)
+        .export_values();
+
+    // ParticleSwarmSolver::Config
+    py::class_<tree_packing::ParticleSwarmSolver::Config>(m, "PSOConfig")
+        .def(py::init<>())
+        .def_readwrite("n_particles", &tree_packing::ParticleSwarmSolver::Config::n_particles)
+        .def_readwrite("n_iterations", &tree_packing::ParticleSwarmSolver::Config::n_iterations)
+        .def_readwrite("w", &tree_packing::ParticleSwarmSolver::Config::w)
+        .def_readwrite("c1", &tree_packing::ParticleSwarmSolver::Config::c1)
+        .def_readwrite("c2", &tree_packing::ParticleSwarmSolver::Config::c2)
+        .def_readwrite("mu0", &tree_packing::ParticleSwarmSolver::Config::mu0)
+        .def_readwrite("mu_max", &tree_packing::ParticleSwarmSolver::Config::mu_max)
+        .def_readwrite("isolation_penalty_per_missing", &tree_packing::ParticleSwarmSolver::Config::isolation_penalty_per_missing)
+        .def_readwrite("target_neighbors", &tree_packing::ParticleSwarmSolver::Config::target_neighbors)
+        .def_readwrite("vel_max", &tree_packing::ParticleSwarmSolver::Config::vel_max)
+        .def_readwrite("vel_ang_max", &tree_packing::ParticleSwarmSolver::Config::vel_ang_max)
+        .def_readwrite("constrain_to_cell", &tree_packing::ParticleSwarmSolver::Config::constrain_to_cell)
+        .def_readwrite("prefer_current_cell", &tree_packing::ParticleSwarmSolver::Config::prefer_current_cell)
+        .def_readwrite("objective_type", &tree_packing::ParticleSwarmSolver::Config::objective_type);
+
+    // ParticleSwarmSolver
+    py::class_<tree_packing::ParticleSwarmSolver, tree_packing::Solver, std::shared_ptr<tree_packing::ParticleSwarmSolver>>(m, "ParticleSwarmSolver")
+        .def(py::init<>())
+        .def(py::init<const tree_packing::ParticleSwarmSolver::Config&>(), py::arg("config"))
+        .def(py::init([](
+            int n_particles,
+            int n_iterations,
+            float w,
+            float c1,
+            float c2,
+            float mu0,
+            float mu_max,
+            float isolation_penalty_per_missing,
+            float target_neighbors,
+            float vel_max,
+            float vel_ang_max,
+            bool constrain_to_cell,
+            bool prefer_current_cell,
+            py::object objective_type_obj
+        ) {
+            tree_packing::ParticleSwarmSolver::Config config;
+            config.n_particles = n_particles;
+            config.n_iterations = n_iterations;
+            config.w = w;
+            config.c1 = c1;
+            config.c2 = c2;
+            config.mu0 = mu0;
+            config.mu_max = mu_max;
+            config.isolation_penalty_per_missing = isolation_penalty_per_missing;
+            config.target_neighbors = target_neighbors;
+            config.vel_max = vel_max;
+            config.vel_ang_max = vel_ang_max;
+            config.constrain_to_cell = constrain_to_cell;
+            config.prefer_current_cell = prefer_current_cell;
+            // Accept string or enum
+            if (py::isinstance<py::str>(objective_type_obj)) {
+                std::string s = objective_type_obj.cast<std::string>();
+                if (s == "Distance" || s == "distance") {
+                    config.objective_type = tree_packing::ParticleSwarmSolver::ObjectiveType::Distance;
+                } else if (s == "Linf" || s == "linf") {
+                    config.objective_type = tree_packing::ParticleSwarmSolver::ObjectiveType::Linf;
+                } else if (s == "Zero" || s == "zero") {
+                    config.objective_type = tree_packing::ParticleSwarmSolver::ObjectiveType::Zero;
+                } else {
+                    throw std::invalid_argument("objective_type must be 'Distance', 'Linf', or 'Zero'");
+                }
+            } else {
+                config.objective_type = objective_type_obj.cast<tree_packing::ParticleSwarmSolver::ObjectiveType>();
+            }
+            return std::make_shared<tree_packing::ParticleSwarmSolver>(config);
+        }),
+            py::arg("n_particles") = 32,
+            py::arg("n_iterations") = 50,
+            py::arg("w") = 0.7f,
+            py::arg("c1") = 1.5f,
+            py::arg("c2") = 1.5f,
+            py::arg("mu0") = 1.0f,
+            py::arg("mu_max") = 1e6f,
+            py::arg("isolation_penalty_per_missing") = std::log(2.0f),
+            py::arg("target_neighbors") = 8.0f,
+            py::arg("vel_max") = 1.0f,
+            py::arg("vel_ang_max") = 0.785f,
+            py::arg("constrain_to_cell") = true,
+            py::arg("prefer_current_cell") = true,
+            py::arg("objective_type") = "Distance"
+        )
+        .def("config", py::overload_cast<>(&tree_packing::ParticleSwarmSolver::config),
+            py::return_value_policy::reference_internal);
+
+    // RandomSamplingSolver::ObjectiveType enum
+    py::enum_<tree_packing::RandomSamplingSolver::ObjectiveType>(m, "RandomSamplingObjectiveType")
+        .value("Distance", tree_packing::RandomSamplingSolver::ObjectiveType::Distance)
+        .value("Linf", tree_packing::RandomSamplingSolver::ObjectiveType::Linf)
+        .value("Zero", tree_packing::RandomSamplingSolver::ObjectiveType::Zero)
+        .export_values();
+
+    // RandomSamplingSolver::Config
+    py::class_<tree_packing::RandomSamplingSolver::Config>(m, "RandomSamplingConfig")
+        .def(py::init<>())
+        .def_readwrite("n_samples", &tree_packing::RandomSamplingSolver::Config::n_samples)
+        .def_readwrite("mu", &tree_packing::RandomSamplingSolver::Config::mu)
+        .def_readwrite("isolation_penalty_per_missing", &tree_packing::RandomSamplingSolver::Config::isolation_penalty_per_missing)
+        .def_readwrite("target_neighbors", &tree_packing::RandomSamplingSolver::Config::target_neighbors)
+        .def_readwrite("constrain_to_cell", &tree_packing::RandomSamplingSolver::Config::constrain_to_cell)
+        .def_readwrite("prefer_current_cell", &tree_packing::RandomSamplingSolver::Config::prefer_current_cell)
+        .def_readwrite("objective_type", &tree_packing::RandomSamplingSolver::Config::objective_type);
+
+    // RandomSamplingSolver
+    py::class_<tree_packing::RandomSamplingSolver, tree_packing::Solver, std::shared_ptr<tree_packing::RandomSamplingSolver>>(m, "RandomSamplingSolver")
+        .def(py::init<>())
+        .def(py::init<const tree_packing::RandomSamplingSolver::Config&>(), py::arg("config"))
+        .def(py::init([](
+            int n_samples,
+            float mu,
+            float isolation_penalty_per_missing,
+            float target_neighbors,
+            bool constrain_to_cell,
+            bool prefer_current_cell,
+            py::object objective_type_obj
+        ) {
+            tree_packing::RandomSamplingSolver::Config config;
+            config.n_samples = n_samples;
+            config.mu = mu;
+            config.isolation_penalty_per_missing = isolation_penalty_per_missing;
+            config.target_neighbors = target_neighbors;
+            config.constrain_to_cell = constrain_to_cell;
+            config.prefer_current_cell = prefer_current_cell;
+            // Accept string or enum
+            if (py::isinstance<py::str>(objective_type_obj)) {
+                std::string s = objective_type_obj.cast<std::string>();
+                if (s == "Distance" || s == "distance") {
+                    config.objective_type = tree_packing::RandomSamplingSolver::ObjectiveType::Distance;
+                } else if (s == "Linf" || s == "linf") {
+                    config.objective_type = tree_packing::RandomSamplingSolver::ObjectiveType::Linf;
+                } else if (s == "Zero" || s == "zero") {
+                    config.objective_type = tree_packing::RandomSamplingSolver::ObjectiveType::Zero;
+                } else {
+                    throw std::invalid_argument("objective_type must be 'Distance', 'Linf', or 'Zero'");
+                }
+            } else {
+                config.objective_type = objective_type_obj.cast<tree_packing::RandomSamplingSolver::ObjectiveType>();
+            }
+            return std::make_shared<tree_packing::RandomSamplingSolver>(config);
+        }),
+            py::arg("n_samples") = 100,
+            py::arg("mu") = 1e6f,
+            py::arg("isolation_penalty_per_missing") = std::log(2.0f),
+            py::arg("target_neighbors") = 8.0f,
+            py::arg("constrain_to_cell") = true,
+            py::arg("prefer_current_cell") = true,
+            py::arg("objective_type") = "Linf"
+        )
+        .def("config", py::overload_cast<>(&tree_packing::RandomSamplingSolver::config),
+            py::return_value_policy::reference_internal);
+
+    // BeamDescentSolver::ObjectiveType enum
+    py::enum_<tree_packing::BeamDescentSolver::ObjectiveType>(m, "BeamDescentObjectiveType")
+        .value("Distance", tree_packing::BeamDescentSolver::ObjectiveType::Distance)
+        .value("Linf", tree_packing::BeamDescentSolver::ObjectiveType::Linf)
+        .value("Zero", tree_packing::BeamDescentSolver::ObjectiveType::Zero)
+        .export_values();
+
+    // BeamDescentSolver::Config
+    py::class_<tree_packing::BeamDescentSolver::Config>(m, "BeamDescentConfig")
+        .def(py::init<>())
+        .def_readwrite("lattice_xy", &tree_packing::BeamDescentSolver::Config::lattice_xy)
+        .def_readwrite("lattice_ang", &tree_packing::BeamDescentSolver::Config::lattice_ang)
+        .def_readwrite("beam_width", &tree_packing::BeamDescentSolver::Config::beam_width)
+        .def_readwrite("descent_levels", &tree_packing::BeamDescentSolver::Config::descent_levels)
+        .def_readwrite("max_iters_per_level", &tree_packing::BeamDescentSolver::Config::max_iters_per_level)
+        .def_readwrite("step_xy0", &tree_packing::BeamDescentSolver::Config::step_xy0)
+        .def_readwrite("step_xy_decay", &tree_packing::BeamDescentSolver::Config::step_xy_decay)
+        .def_readwrite("step_ang0", &tree_packing::BeamDescentSolver::Config::step_ang0)
+        .def_readwrite("step_ang_decay", &tree_packing::BeamDescentSolver::Config::step_ang_decay)
+        .def_readwrite("mu", &tree_packing::BeamDescentSolver::Config::mu)
+        .def_readwrite("isolation_penalty_per_missing", &tree_packing::BeamDescentSolver::Config::isolation_penalty_per_missing)
+        .def_readwrite("target_neighbors", &tree_packing::BeamDescentSolver::Config::target_neighbors)
+        .def_readwrite("constrain_to_cell", &tree_packing::BeamDescentSolver::Config::constrain_to_cell)
+        .def_readwrite("prefer_current_cell", &tree_packing::BeamDescentSolver::Config::prefer_current_cell)
+        .def_readwrite("objective_type", &tree_packing::BeamDescentSolver::Config::objective_type);
+
+    // BeamDescentSolver
+    py::class_<tree_packing::BeamDescentSolver, tree_packing::Solver, std::shared_ptr<tree_packing::BeamDescentSolver>>(m, "BeamDescentSolver")
+        .def(py::init<>())
+        .def(py::init<const tree_packing::BeamDescentSolver::Config&>(), py::arg("config"))
+        .def(py::init([](
+            int lattice_xy,
+            int lattice_ang,
+            int beam_width,
+            int descent_levels,
+            int max_iters_per_level,
+            float step_xy0,
+            float step_xy_decay,
+            float step_ang0,
+            float step_ang_decay,
+            float mu,
+            float isolation_penalty_per_missing,
+            float target_neighbors,
+            bool constrain_to_cell,
+            bool prefer_current_cell,
+            py::object objective_type_obj
+        ) {
+            tree_packing::BeamDescentSolver::Config config;
+            config.lattice_xy = lattice_xy;
+            config.lattice_ang = lattice_ang;
+            config.beam_width = beam_width;
+            config.descent_levels = descent_levels;
+            config.max_iters_per_level = max_iters_per_level;
+            config.step_xy0 = step_xy0;
+            config.step_xy_decay = step_xy_decay;
+            config.step_ang0 = step_ang0;
+            config.step_ang_decay = step_ang_decay;
+            config.mu = mu;
+            config.isolation_penalty_per_missing = isolation_penalty_per_missing;
+            config.target_neighbors = target_neighbors;
+            config.constrain_to_cell = constrain_to_cell;
+            config.prefer_current_cell = prefer_current_cell;
+            // Accept string or enum
+            if (py::isinstance<py::str>(objective_type_obj)) {
+                std::string s = objective_type_obj.cast<std::string>();
+                if (s == "Distance" || s == "distance") {
+                    config.objective_type = tree_packing::BeamDescentSolver::ObjectiveType::Distance;
+                } else if (s == "Linf" || s == "linf") {
+                    config.objective_type = tree_packing::BeamDescentSolver::ObjectiveType::Linf;
+                } else if (s == "Zero" || s == "zero") {
+                    config.objective_type = tree_packing::BeamDescentSolver::ObjectiveType::Zero;
+                } else {
+                    throw std::invalid_argument("objective_type must be 'Distance', 'Linf', or 'Zero'");
+                }
+            } else {
+                config.objective_type = objective_type_obj.cast<tree_packing::BeamDescentSolver::ObjectiveType>();
+            }
+            return std::make_shared<tree_packing::BeamDescentSolver>(config);
+        }),
+            py::arg("lattice_xy") = 5,
+            py::arg("lattice_ang") = 8,
+            py::arg("beam_width") = 8,
+            py::arg("descent_levels") = 4,
+            py::arg("max_iters_per_level") = 8,
+            py::arg("step_xy0") = 0.5f,
+            py::arg("step_xy_decay") = 0.5f,
+            py::arg("step_ang0") = tree_packing::PI / 8.0f,
+            py::arg("step_ang_decay") = 0.5f,
+            py::arg("mu") = 1e6f,
+            py::arg("isolation_penalty_per_missing") = std::log(2.0f),
+            py::arg("target_neighbors") = 8.0f,
+            py::arg("constrain_to_cell") = true,
+            py::arg("prefer_current_cell") = true,
+            py::arg("objective_type") = "Distance"
+        )
+        .def("config", py::overload_cast<>(&tree_packing::BeamDescentSolver::config),
+            py::return_value_policy::reference_internal);
+
+    // NoiseSolver::ObjectiveType enum
+    py::enum_<tree_packing::NoiseSolver::ObjectiveType>(m, "NoiseSolverObjectiveType")
+        .value("Distance", tree_packing::NoiseSolver::ObjectiveType::Distance)
+        .value("Linf", tree_packing::NoiseSolver::ObjectiveType::Linf)
+        .value("Zero", tree_packing::NoiseSolver::ObjectiveType::Zero)
+        .export_values();
+
+    // NoiseSolver::Config
+    py::class_<tree_packing::NoiseSolver::Config>(m, "NoiseSolverConfig")
+        .def(py::init<>())
+        .def_readwrite("n_variations", &tree_packing::NoiseSolver::Config::n_variations)
+        .def_readwrite("pos_sigma", &tree_packing::NoiseSolver::Config::pos_sigma)
+        .def_readwrite("ang_sigma", &tree_packing::NoiseSolver::Config::ang_sigma)
+        .def_readwrite("mu", &tree_packing::NoiseSolver::Config::mu)
+        .def_readwrite("isolation_penalty_per_missing", &tree_packing::NoiseSolver::Config::isolation_penalty_per_missing)
+        .def_readwrite("target_neighbors", &tree_packing::NoiseSolver::Config::target_neighbors)
+        .def_readwrite("constrain_to_cell", &tree_packing::NoiseSolver::Config::constrain_to_cell)
+        .def_readwrite("prefer_current_cell", &tree_packing::NoiseSolver::Config::prefer_current_cell)
+        .def_readwrite("objective_type", &tree_packing::NoiseSolver::Config::objective_type);
+
+    // NoiseSolver
+    py::class_<tree_packing::NoiseSolver, tree_packing::Solver, std::shared_ptr<tree_packing::NoiseSolver>>(m, "NoiseSolver")
+        .def(py::init<>())
+        .def(py::init<const tree_packing::NoiseSolver::Config&>(), py::arg("config"))
+        .def(py::init([](
+            int n_variations,
+            float pos_sigma,
+            float ang_sigma,
+            float mu,
+            float isolation_penalty_per_missing,
+            float target_neighbors,
+            bool constrain_to_cell,
+            bool prefer_current_cell,
+            py::object objective_type_obj
+        ) {
+            tree_packing::NoiseSolver::Config config;
+            config.n_variations = n_variations;
+            config.pos_sigma = pos_sigma;
+            config.ang_sigma = ang_sigma;
+            config.mu = mu;
+            config.isolation_penalty_per_missing = isolation_penalty_per_missing;
+            config.target_neighbors = target_neighbors;
+            config.constrain_to_cell = constrain_to_cell;
+            config.prefer_current_cell = prefer_current_cell;
+            if (py::isinstance<py::str>(objective_type_obj)) {
+                std::string s = objective_type_obj.cast<std::string>();
+                if (s == "Distance" || s == "distance") {
+                    config.objective_type = tree_packing::NoiseSolver::ObjectiveType::Distance;
+                } else if (s == "Linf" || s == "linf") {
+                    config.objective_type = tree_packing::NoiseSolver::ObjectiveType::Linf;
+                } else if (s == "Zero" || s == "zero") {
+                    config.objective_type = tree_packing::NoiseSolver::ObjectiveType::Zero;
+                } else {
+                    throw std::invalid_argument("objective_type must be 'Distance', 'Linf', or 'Zero'");
+                }
+            } else {
+                config.objective_type = objective_type_obj.cast<tree_packing::NoiseSolver::ObjectiveType>();
+            }
+            return std::make_shared<tree_packing::NoiseSolver>(config);
+        }),
+            py::arg("n_variations") = 128,
+            py::arg("pos_sigma") = 0.25f,
+            py::arg("ang_sigma") = tree_packing::PI / 16.0f,
+            py::arg("mu") = 1e6f,
+            py::arg("isolation_penalty_per_missing") = std::log(2.0f),
+            py::arg("target_neighbors") = 8.0f,
+            py::arg("constrain_to_cell") = true,
+            py::arg("prefer_current_cell") = true,
+            py::arg("objective_type") = "Distance"
+        )
+        .def("config", py::overload_cast<>(&tree_packing::NoiseSolver::config),
+            py::return_value_policy::reference_internal);
+
+    // NelderMeadSolver::Config
+    py::enum_<tree_packing::NelderMeadSolver::ObjectiveType>(m, "NelderMeadObjectiveType")
+        .value("Distance", tree_packing::NelderMeadSolver::ObjectiveType::Distance)
+        .value("Linf", tree_packing::NelderMeadSolver::ObjectiveType::Linf)
+        .value("Zero", tree_packing::NelderMeadSolver::ObjectiveType::Zero)
+        .export_values();
+
+    py::class_<tree_packing::NelderMeadSolver::Config>(m, "NelderMeadConfig")
+        .def(py::init<>())
+        .def_readwrite("step_xy", &tree_packing::NelderMeadSolver::Config::step_xy)
+        .def_readwrite("step_ang", &tree_packing::NelderMeadSolver::Config::step_ang)
+        .def_readwrite("randomize_simplex", &tree_packing::NelderMeadSolver::Config::randomize_simplex)
+        .def_readwrite("jitter_xy", &tree_packing::NelderMeadSolver::Config::jitter_xy)
+        .def_readwrite("jitter_ang", &tree_packing::NelderMeadSolver::Config::jitter_ang)
+        .def_readwrite("alpha", &tree_packing::NelderMeadSolver::Config::alpha)
+        .def_readwrite("gamma", &tree_packing::NelderMeadSolver::Config::gamma)
+        .def_readwrite("rho", &tree_packing::NelderMeadSolver::Config::rho)
+        .def_readwrite("sigma", &tree_packing::NelderMeadSolver::Config::sigma)
+        .def_readwrite("max_iters", &tree_packing::NelderMeadSolver::Config::max_iters)
+        .def_readwrite("tol_f", &tree_packing::NelderMeadSolver::Config::tol_f)
+        .def_readwrite("tol_x", &tree_packing::NelderMeadSolver::Config::tol_x)
+        .def_readwrite("mu", &tree_packing::NelderMeadSolver::Config::mu)
+        .def_readwrite("constrain_to_cell", &tree_packing::NelderMeadSolver::Config::constrain_to_cell)
+        .def_readwrite("prefer_current_cell", &tree_packing::NelderMeadSolver::Config::prefer_current_cell)
+        .def_readwrite("objective_type", &tree_packing::NelderMeadSolver::Config::objective_type);
+
+    // NelderMeadSolver
+    py::class_<tree_packing::NelderMeadSolver, tree_packing::Solver, std::shared_ptr<tree_packing::NelderMeadSolver>>(m, "NelderMeadSolver")
+        .def(py::init<>())
+        .def(py::init<const tree_packing::NelderMeadSolver::Config&>(), py::arg("config"))
+        .def(py::init([](
+            float step_xy,
+            float step_ang,
+            bool randomize_simplex,
+            float jitter_xy,
+            float jitter_ang,
+            float alpha,
+            float gamma,
+            float rho,
+            float sigma,
+            int max_iters,
+            float tol_f,
+            float tol_x,
+            float mu,
+            bool constrain_to_cell,
+            bool prefer_current_cell,
+            py::object objective_type_obj
+        ) {
+            tree_packing::NelderMeadSolver::Config config;
+            config.step_xy = step_xy;
+            config.step_ang = step_ang;
+            config.randomize_simplex = randomize_simplex;
+            config.jitter_xy = jitter_xy;
+            config.jitter_ang = jitter_ang;
+            config.alpha = alpha;
+            config.gamma = gamma;
+            config.rho = rho;
+            config.sigma = sigma;
+            config.max_iters = max_iters;
+            config.tol_f = tol_f;
+            config.tol_x = tol_x;
+            config.mu = mu;
+            config.constrain_to_cell = constrain_to_cell;
+            config.prefer_current_cell = prefer_current_cell;
+            if (py::isinstance<py::str>(objective_type_obj)) {
+                std::string s = objective_type_obj.cast<std::string>();
+                if (s == "Distance" || s == "distance") {
+                    config.objective_type = tree_packing::NelderMeadSolver::ObjectiveType::Distance;
+                } else if (s == "Linf" || s == "linf") {
+                    config.objective_type = tree_packing::NelderMeadSolver::ObjectiveType::Linf;
+                } else if (s == "Zero" || s == "zero") {
+                    config.objective_type = tree_packing::NelderMeadSolver::ObjectiveType::Zero;
+                } else {
+                    throw std::invalid_argument("objective_type must be 'Distance', 'Linf', or 'Zero'");
+                }
+            } else {
+                config.objective_type = objective_type_obj.cast<tree_packing::NelderMeadSolver::ObjectiveType>();
+            }
+            return std::make_shared<tree_packing::NelderMeadSolver>(config);
+        }),
+            py::arg("step_xy") = 0.25f,
+            py::arg("step_ang") = tree_packing::PI / 24.0f,
+            py::arg("randomize_simplex") = true,
+            py::arg("jitter_xy") = 0.5f,
+            py::arg("jitter_ang") = tree_packing::PI / 12.0f,
+            py::arg("alpha") = 1.0f,
+            py::arg("gamma") = 2.0f,
+            py::arg("rho") = 0.5f,
+            py::arg("sigma") = 0.5f,
+            py::arg("max_iters") = 80,
+            py::arg("tol_f") = 1e-5f,
+            py::arg("tol_x") = 1e-4f,
+            py::arg("mu") = 1e6f,
+            py::arg("constrain_to_cell") = true,
+            py::arg("prefer_current_cell") = true,
+            py::arg("objective_type") = "Distance"
+        )
+        .def("config", py::overload_cast<>(&tree_packing::NelderMeadSolver::config),
+            py::return_value_policy::reference_internal);
+
+    // SolverRecreate optimizer
+    py::class_<tree_packing::SolverRecreate, tree_packing::Optimizer, std::shared_ptr<tree_packing::SolverRecreate>>(m, "SolverRecreate")
+        .def(py::init([](
+            std::shared_ptr<tree_packing::Solver> solver,
+            int max_recreate,
+            int num_samples,
+            bool verbose
+        ) {
+            // Clone the solver to transfer ownership
+            tree_packing::SolverPtr solver_ptr = solver->clone();
+            return std::make_shared<tree_packing::SolverRecreate>(
+                std::move(solver_ptr),
+                max_recreate,
+                num_samples,
+                verbose
+            );
+        }),
+            py::arg("solver"),
+            py::arg("max_recreate") = 1,
+            py::arg("num_samples") = 16,
+            py::arg("verbose") = false)
+        .def("solver", py::overload_cast<>(&tree_packing::SolverRecreate::solver),
+            py::return_value_policy::reference_internal);
+
+    // SolverOptimize optimizer
+    py::class_<tree_packing::SolverOptimize, tree_packing::Optimizer, std::shared_ptr<tree_packing::SolverOptimize>>(m, "SolverOptimize")
+        .def(py::init([](
+            std::shared_ptr<tree_packing::Solver> solver,
+            int max_optimize,
+            int group_size,
+            bool same_cell_pairs,
+            int num_samples,
+            bool verbose
+        ) {
+            // Clone the solver to transfer ownership
+            tree_packing::SolverPtr solver_ptr = solver->clone();
+            return std::make_shared<tree_packing::SolverOptimize>(
+                std::move(solver_ptr),
+                max_optimize,
+                group_size,
+                same_cell_pairs,
+                num_samples,
+                verbose
+            );
+        }),
+            py::arg("solver"),
+            py::arg("max_optimize") = 1,
+            py::arg("group_size") = 1,
+            py::arg("same_cell_pairs") = false,
+            py::arg("num_samples") = 8,
+            py::arg("verbose") = false)
+        .def("solver", py::overload_cast<>(&tree_packing::SolverOptimize::solver),
+            py::return_value_policy::reference_internal);
 
     // Helper function to run optimization
     m.def("run_optimization", [](

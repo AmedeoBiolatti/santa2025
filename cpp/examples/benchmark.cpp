@@ -7,6 +7,7 @@ using namespace tree_packing;
 
 int main(int argc, char** argv) {
     int num_iterations = 50000000;
+    int num_trees = 10;
     if (argc > 1) {
         try {
             num_iterations = std::stoi(argv[1]);
@@ -14,11 +15,17 @@ int main(int argc, char** argv) {
             std::cerr << "Invalid iteration count, using default.\n";
         }
     }
+    if (argc > 2) {
+        try {
+            num_trees = std::stoi(argv[2]);
+        } catch (...) {
+            std::cerr << "Invalid tree count, using default.\n";
+        }
+    }
 
     Problem problem = Problem::create_tree_packing_problem();
 
-    const int num_trees = 32;
-    const float side = 6.0f;
+    const float side = 6.0f + 0.1f * static_cast<float>(num_trees);  // Scale with tree count
     const uint64_t seed = 42;
 
     Solution initial = Solution::init_random(num_trees, side, seed);
@@ -115,6 +122,71 @@ int main(int argc, char** argv) {
             false
         );
         benchmark("SimulatedAnnealing(Noise)", sa);
+    }
+
+    // Solver-based optimizers (use fewer iterations since they're slower)
+    int solver_iterations = std::min(num_iterations, 10000);
+
+    {
+        ParticleSwarmSolver::Config pso_config;
+        pso_config.n_particles = 16;
+        pso_config.n_iterations = 20;
+        pso_config.constrain_to_cell = true;
+        pso_config.objective_type = ParticleSwarmSolver::ObjectiveType::Linf;
+        auto pso_solver = std::make_shared<ParticleSwarmSolver>(pso_config);
+
+        SolverOptimize solver_opt(pso_solver->clone(), 1, 1, false);
+
+        solver_opt.set_problem(&problem);
+        SolutionEval eval_pso = problem.eval(initial);
+        std::any state_pso = solver_opt.init_state(eval_pso);
+        GlobalState gs_pso(seed, eval_pso);
+
+        auto start = std::chrono::high_resolution_clock::now();
+        solver_opt.run(eval_pso, state_pso, gs_pso, solver_iterations);
+        auto end = std::chrono::high_resolution_clock::now();
+
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        double seconds = duration.count() / 1e6;
+        double iters_per_sec = solver_iterations / seconds;
+
+        std::cout << "\n[SolverOptimize(PSO)]\n";
+        std::cout << "Iterations:      " << solver_iterations << "\n";
+        std::cout << "Time:            " << seconds << " s\n";
+        std::cout << "Iterations/sec:  " << static_cast<int>(iters_per_sec) << "\n";
+        std::cout << "us/iteration:    " << (duration.count() / static_cast<double>(solver_iterations)) << "\n";
+        std::cout << "Final objective: " << eval_pso.objective << "\n";
+        std::cout << "Final violation: " << eval_pso.total_violation() << "\n";
+    }
+
+    {
+        RandomSamplingSolver::Config rs_config;
+        rs_config.n_samples = 100;
+        rs_config.constrain_to_cell = true;
+        auto rs_solver = std::make_shared<RandomSamplingSolver>(rs_config);
+
+        SolverOptimize solver_opt(rs_solver->clone(), 1, 1, false);
+
+        solver_opt.set_problem(&problem);
+        SolutionEval eval_rs = problem.eval(initial);
+        std::any state_rs = solver_opt.init_state(eval_rs);
+        GlobalState gs_rs(seed, eval_rs);
+
+        auto start = std::chrono::high_resolution_clock::now();
+        solver_opt.run(eval_rs, state_rs, gs_rs, solver_iterations);
+        auto end = std::chrono::high_resolution_clock::now();
+
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+        double seconds = duration.count() / 1e6;
+        double iters_per_sec = solver_iterations / seconds;
+
+        std::cout << "\n[SolverOptimize(RandomSampling)]\n";
+        std::cout << "Iterations:      " << solver_iterations << "\n";
+        std::cout << "Time:            " << seconds << " s\n";
+        std::cout << "Iterations/sec:  " << static_cast<int>(iters_per_sec) << "\n";
+        std::cout << "us/iteration:    " << (duration.count() / static_cast<double>(solver_iterations)) << "\n";
+        std::cout << "Final objective: " << eval_rs.objective << "\n";
+        std::cout << "Final violation: " << eval_rs.total_violation() << "\n";
     }
 
     return 0;
