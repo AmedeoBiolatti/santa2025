@@ -115,8 +115,8 @@ struct SolutionEval {
     float objective{0.0f};
 
     // Constraint evaluations
-    float intersection_violation{0.0f};
-    float bounds_violation{0.0f};
+    double intersection_violation{0.0};
+    double bounds_violation{0.0};
     int intersection_count{0};
 
     // Intersection map (cached for incremental updates)
@@ -163,9 +163,9 @@ struct SolutionEval {
         intersection_map = other.intersection_map;
     }
 
-    [[nodiscard]] float total_violation() const {
-        float v = intersection_violation + bounds_violation;
-        return v > 0.0f ? v : 0.0f;
+    [[nodiscard]] double total_violation() const {
+        double v = intersection_violation + bounds_violation;
+        return v > 0.0 ? v : 0.0;
     }
 
     [[nodiscard]] int n_missing() const {

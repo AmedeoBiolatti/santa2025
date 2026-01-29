@@ -100,21 +100,28 @@ public:
         }
     }
 
-    // Compute score (objective + penalty * violations + missing penalty + ceiling penalty)
-    [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
+    // Compute score without objective ceiling (used for best feasible tracking)
+    [[nodiscard]] float base_score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
         float mu = global_state.mu();
 
-        float violation = solution_eval.total_violation();
+        float violation = static_cast<float>(solution_eval.total_violation());
         int n_missing = solution_eval.n_missing();
         float reg = solution_eval.reg();
+        float objective = solution_eval.objective;
 
         float penalty = compute_constraint_penalty(violation, mu);
-        float s = solution_eval.objective + penalty + 1.0f * static_cast<float>(n_missing) + 1e-6f * reg;
+        return objective + penalty + 1.0f * static_cast<float>(n_missing) + 1e-6f * reg;
+    }
+
+    // Compute score (objective + penalty * violations + missing penalty + ceiling penalty)
+    [[nodiscard]] float score(const SolutionEval& solution_eval, const GlobalState& global_state) const {
+        float s = base_score(solution_eval, global_state);
+        float objective = solution_eval.objective;
 
         // Apply objective ceiling penalty if enabled
         float ceiling = effective_ceiling(global_state);
         if (std::isfinite(ceiling)) {
-            float ceiling_violation = solution_eval.objective - ceiling;
+            float ceiling_violation = objective - ceiling;
             if (ceiling_violation > 0.0f) {
                 s += objective_ceiling_mu_ * ceiling_violation;
             }
@@ -172,7 +179,7 @@ public:
     [[nodiscard]] float objective(const Solution& solution) const;
 
     // Individual constraint evaluations
-    [[nodiscard]] float intersection_constraint(const Solution& solution) const;
+    [[nodiscard]] double intersection_constraint(const Solution& solution) const;
     [[nodiscard]] float bounds_constraint(const Solution& solution) const;
 
     // Incremental constraint updates

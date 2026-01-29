@@ -16,28 +16,28 @@ public:
     IntersectionConstraint() { init(); }
 
     // Full evaluation (compute sparse intersection map)
-    [[nodiscard]] float eval(
+    [[nodiscard]] double eval(
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         int* out_count = nullptr
     ) const;
 
     // Incremental evaluation (update map for modified indices)
-    [[nodiscard]] float eval_update(
+    [[nodiscard]] double eval_update(
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         const std::vector<int>& modified_indices,
-        float prev_total,
+        double prev_total,
         int prev_count,
         int* out_count = nullptr
     ) const;
 
     // Incremental evaluation for removals only (no recomputation for removed indices)
-    [[nodiscard]] float eval_remove(
+    [[nodiscard]] double eval_remove(
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         const std::vector<int>& removed_indices,
-        float prev_total,
+        double prev_total,
         int prev_count,
         int* out_count = nullptr
     ) const;
@@ -45,28 +45,28 @@ public:
     // ============ Figure Hash Based Methods ============
 
     // Full evaluation using figure hash (spatial hashing at figure level)
-    [[nodiscard]] float eval_figure_hash(
+    [[nodiscard]] double eval_figure_hash(
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         int* out_count = nullptr
     ) const;
 
     // Incremental evaluation using figure hash
-    [[nodiscard]] float eval_update_figure_hash(
+    [[nodiscard]] double eval_update_figure_hash(
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         const std::vector<int>& modified_indices,
-        float prev_total,
+        double prev_total,
         int prev_count,
         int* out_count = nullptr
     ) const;
 
     // Incremental removal using figure hash
-    [[nodiscard]] float eval_remove_figure_hash(
+    [[nodiscard]] double eval_remove_figure_hash(
         const Solution& solution,
         SolutionEval::IntersectionMap& map,
         const std::vector<int>& removed_indices,
-        float prev_total,
+        double prev_total,
         int prev_count,
         int* out_count = nullptr
     ) const;

@@ -15,6 +15,9 @@ class Problem;
 // Global optimization state with best solution tracking
 class GlobalState {
 public:
+    static constexpr float kDefaultTolerance = 1e-12f;
+    [[nodiscard]] static float default_tolerance() { return kDefaultTolerance; }
+
     GlobalState() = default;
     explicit GlobalState(uint64_t seed);
     GlobalState(uint64_t seed, const SolutionEval& initial_solution);
@@ -85,7 +88,7 @@ private:
     std::optional<TreeParamsSoA> best_feasible_params_;
 
     float mu_{1e6f};
-    float tol_{1e-12f};
+    float tol_{kDefaultTolerance};
 
     UpdateStack update_stack_{64};  // Pre-allocated with default capacity
 };
