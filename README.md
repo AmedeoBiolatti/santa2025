@@ -4,11 +4,11 @@ A solution framework for the [Kaggle Santa 2024](https://www.kaggle.com/competit
 
 ## The Problem
 
-Pack N Christmas trees (polygonal shapes with 5 triangular faces) into a 2D square space. Each tree can be translated and rotated. Trees cannot overlap (touching at edges/vertices is allowed). The goal is to minimize the bounding square side length.
+Pack N Christmas tr ees (polygonal shapes with 5 triangular faces) into a 2D square space. Each tree can be translated and rotated. Trees cannot overlap (touching at edges/vertices is allowed). The goal is to minimize the bounding square side length.
 
 **Objective:** Minimize
 
-$$\frac{\text{side\_length}^2}{\text{num\_trees}}$$
+$`\frac{\text{side\_length}^2}{\text{num\_trees}}`$
 
 ## Dashboard
 
