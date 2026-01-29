@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "tree_packing/tree_packing.hpp"
+#include <cmath>
 
 using namespace tree_packing;
 using Catch::Approx;
@@ -199,6 +200,122 @@ TEST_CASE("SimulatedAnnealing", "[optimizers]") {
             RNG rng(global_state.split_rng());
             sa.apply(eval, state, global_state, rng);
         }
+    }
+}
+
+namespace {
+bool params_different(const TreeParams& a, const TreeParams& b, float tol = 1e-5f) {
+    return std::abs(a.pos.x - b.pos.x) > tol ||
+           std::abs(a.pos.y - b.pos.y) > tol ||
+           std::abs(a.angle - b.angle) > tol;
+}
+}  // namespace
+
+TEST_CASE("Solvers change params", "[solvers]") {
+    Problem problem = Problem::create_tree_packing_problem();
+    Solution sol = Solution::init_random(24, 6.0f, 123);
+    SolutionEval eval = problem.eval(sol);
+    const int target_idx = 0;
+    const TreeParams initial = eval.solution.get_params(static_cast<size_t>(target_idx));
+
+    SECTION("RandomSamplingSolver") {
+        RandomSamplingSolver solver(RandomSamplingSolver::Config{
+            .n_samples = 256,
+            .mu = 1e6f,
+            .isolation_penalty_per_missing = std::log(2.0f),
+            .target_neighbors = 8.0f,
+            .constrain_to_cell = false,
+            .prefer_current_cell = true,
+            .objective_type = RandomSamplingSolver::ObjectiveType::Distance,
+        });
+        RNG rng(1);
+        auto res = solver.solve_single(eval, target_idx, rng);
+        REQUIRE(params_different(initial, res.params.get(0)));
+    }
+
+    SECTION("ParticleSwarmSolver") {
+        ParticleSwarmSolver solver(ParticleSwarmSolver::Config{
+            .n_particles = 64,
+            .n_iterations = 40,
+            .w = 0.7f,
+            .c1 = 1.5f,
+            .c2 = 1.5f,
+            .mu0 = 1e3f,
+            .mu_max = 1e6f,
+            .isolation_penalty_per_missing = std::log(2.0f),
+            .target_neighbors = 8.0f,
+            .vel_max = 2.0f,
+            .vel_ang_max = PI / 3.0f,
+            .constrain_to_cell = false,
+            .prefer_current_cell = true,
+            .objective_type = ParticleSwarmSolver::ObjectiveType::Distance,
+        });
+        RNG rng(2);
+        auto res = solver.solve_single(eval, target_idx, rng);
+        REQUIRE(params_different(initial, res.params.get(0)));
+    }
+
+    SECTION("BeamDescentSolver") {
+        BeamDescentSolver solver(BeamDescentSolver::Config{
+            .lattice_xy = 7,
+            .lattice_ang = 10,
+            .beam_width = 10,
+            .descent_levels = 5,
+            .max_iters_per_level = 10,
+            .step_xy0 = 0.75f,
+            .step_xy_decay = 0.5f,
+            .step_ang0 = PI / 6.0f,
+            .step_ang_decay = 0.5f,
+            .mu = 1e6f,
+            .isolation_penalty_per_missing = std::log(2.0f),
+            .target_neighbors = 8.0f,
+            .constrain_to_cell = false,
+            .prefer_current_cell = true,
+            .objective_type = BeamDescentSolver::ObjectiveType::Distance,
+        });
+        RNG rng(3);
+        auto res = solver.solve_single(eval, target_idx, rng);
+        REQUIRE(params_different(initial, res.params.get(0)));
+    }
+
+    SECTION("NoiseSolver") {
+        NoiseSolver solver(NoiseSolver::Config{
+            .n_variations = 512,
+            .pos_sigma = 0.5f,
+            .ang_sigma = PI / 8.0f,
+            .mu = 1e6f,
+            .isolation_penalty_per_missing = std::log(2.0f),
+            .target_neighbors = 8.0f,
+            .constrain_to_cell = false,
+            .prefer_current_cell = true,
+            .objective_type = NoiseSolver::ObjectiveType::Distance,
+        });
+        solver.set_problem(&problem);
+        RNG rng(4);
+        auto res = solver.solve_single(eval, target_idx, rng);
+        REQUIRE(params_different(initial, res.params.get(0)));
+    }
+
+    SECTION("NelderMeadSolver") {
+        NelderMeadSolver solver(NelderMeadSolver::Config{
+            .step_xy = 1.5f,
+            .step_ang = PI / 6.0f,
+            .alpha = 1.0f,
+            .gamma = 2.0f,
+            .rho = 0.5f,
+            .sigma = 0.5f,
+            .max_iters = 200,
+            .tol_f = 1e-7f,
+            .tol_x = 1e-6f,
+            .mu = 1e3f,
+            .constrain_to_cell = false,
+            .prefer_current_cell = true,
+            .objective_type = NelderMeadSolver::ObjectiveType::Linf,
+        });
+        solver.set_problem(&problem);
+        RNG rng(5);
+        auto res = solver.solve_single(eval, target_idx, rng);
+        REQUIRE(params_different(initial, res.params.get(0)));
     }
 }
 

@@ -12,6 +12,7 @@
 
 // Geometry algorithms
 #include "geometry/sat.hpp"
+#include "geometry/utilities.hpp"
 
 // Constraints
 #include "constraints/intersection.hpp"
@@ -25,6 +26,10 @@
 #include "optimizers/sa.hpp"
 #include "optimizers/combine.hpp"
 #include "optimizers/noise.hpp"
+#include "optimizers/tighten.hpp"
+
+// Solvers (placement optimization)
+#include "solvers/solvers.hpp"
 
 // Random number generation
 #include "random/rng.hpp"

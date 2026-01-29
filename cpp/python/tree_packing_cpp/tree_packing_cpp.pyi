@@ -4,8 +4,10 @@ C++ implementation of tree packing optimization
 from __future__ import annotations
 import numpy
 import typing
-__all__: list[str] = ['ALNS', 'CENTER_R', 'CENTER_Y', 'CellRuin', 'Chain', 'CoolingSchedule', 'GlobalState', 'NoiseOptimizer', 'Optimizer', 'OptimizerState', 'PI', 'Problem', 'RNG', 'RandomRecreate', 'RandomRuin', 'SimulatedAnnealing', 'Solution', 'SolutionEval', 'THR', 'TreeParams', 'TreeParamsSoA', 'Vec2', 'run_optimization']
+__all__: list[str] = ['ALNS', 'CENTER_R', 'CENTER_Y', 'CellRuin', 'Chain', 'CompactionOptimizer', 'CoolingSchedule', 'GlobalState', 'IntersectionTreeFilter', 'LocalSearchOptimizer', 'NoiseOptimizer', 'Optimizer', 'OptimizerState', 'PI', 'Problem', 'RNG', 'RandomRecreate', 'RandomRuin', 'SimulatedAnnealing', 'Solution', 'SolutionEval', 'SqueezeOptimizer', 'THR', 'TreeParams', 'TreeParamsSoA', 'Vec2', 'params_to_figures', 'run_optimization', 'triangle_pair_intersection_scores']
 def params_to_figures(params: TreeParamsSoA) -> numpy.ndarray[numpy.float32]:
+    ...
+def triangle_pair_intersection_scores(a: TreeParams, b: TreeParams, eps: float = 1.0000000116860974e-07) -> numpy.ndarray[numpy.float32]:
     ...
 class ALNS(Optimizer):
     def __init__(self, ruin_operators: list[Optimizer], recreate_operators: list[Optimizer], reaction_factor: float = 0.009999999776482582, reward_improve: float = 1.0, reward_no_improve: float = 0.0, min_weight: float = 0.0010000000474974513, verbose: bool = False) -> None:
@@ -93,6 +95,15 @@ class GlobalState:
 class NoiseOptimizer(Optimizer):
     def __init__(self, noise_level: float = 0.009999999776482582, verbose: bool = False) -> None:
         ...
+class SqueezeOptimizer(Optimizer):
+    def __init__(self, min_scale: float = 0.05000000074505806, shrink: float = 0.9200000166893005, bisect_iters: int = 18, axis_rounds: int = 3, verbose: bool = False) -> None:
+        ...
+class CompactionOptimizer(Optimizer):
+    def __init__(self, iters_per_tree: int = 8, verbose: bool = False) -> None:
+        ...
+class LocalSearchOptimizer(Optimizer):
+    def __init__(self, iters_per_tree: int = 18, verbose: bool = False) -> None:
+        ...
 class Optimizer:
     def apply(self, arg0: SolutionEval, arg1: OptimizerState, arg2: GlobalState, arg3: RNG) -> tuple:
         ...
@@ -161,6 +172,41 @@ class RandomRuin(Optimizer):
 class SimulatedAnnealing(Optimizer):
     def __init__(self, inner_optimizer: Optimizer, initial_temp: float = 1.0, min_temp: float = 9.999999974752427e-07, cooling_schedule: CoolingSchedule = ..., cooling_rate: float = 0.9950000047683716, patience: int = -1, verbose: bool = False) -> None:
         ...
+class Conditional(Optimizer):
+    """
+    Conditional meta-optimizer that applies inner optimizer only when ALL conditions are met.
+
+    All conditions use logical AND - the optimizer runs only if all enabled conditions are true.
+    Set a condition to 0 to disable it.
+
+    Args:
+        inner_optimizer: The optimizer to conditionally apply.
+        every_n: Run when iteration % every_n == 0 (0 = disabled).
+        min_iters_since_improvement: Run when iters_since_improvement >= this value (0 = disabled).
+        min_iters_since_feasible_improvement: Run when iters_since_feasible_improvement >= this value (0 = disabled).
+        verbose: Print debug messages.
+
+    Examples:
+        # Run expensive optimizer every 100 iterations
+        opt = Conditional(expensive_opt, every_n=100)
+
+        # Run diversification when stuck for 50 iterations
+        opt = Conditional(diversify_opt, min_iters_since_improvement=50)
+
+        # Run every 10 iterations AND when stuck for 20 iterations
+        opt = Conditional(opt, every_n=10, min_iters_since_improvement=20)
+    """
+    def __init__(self, inner_optimizer: Optimizer, every_n: int = 0, min_iters_since_improvement: int = 0, min_iters_since_feasible_improvement: int = 0, verbose: bool = False) -> None:
+        ...
+    @property
+    def every_n(self) -> int:
+        ...
+    @property
+    def min_iters_since_improvement(self) -> int:
+        ...
+    @property
+    def min_iters_since_feasible_improvement(self) -> int:
+        ...
 class Solution:
     @staticmethod
     def init_empty(arg0: int) -> Solution:
@@ -201,6 +247,19 @@ class Solution:
     def set_params(self, arg0: int, arg1: TreeParams) -> None:
         ...
     def size(self) -> int:
+        ...
+class IntersectionTreeFilter:
+    def __init__(self) -> None:
+        ...
+    def features_for(self, solution: Solution, idx_a: int, idx_b: int) -> tuple[bool, numpy.ndarray[numpy.float32]]:
+        ...
+    def leaf_index_for(self, solution: Solution, idx_a: int, idx_b: int) -> int:
+        ...
+    def leaf_pred_for(self, solution: Solution, idx_a: int, idx_b: int) -> tuple[bool, int, numpy.ndarray[numpy.uint8]]:
+        ...
+    def ready(self) -> bool:
+        ...
+    def triangle_pairs_for(self, solution: Solution, idx_a: int, idx_b: int) -> list[tuple[int, int]]:
         ...
 class SolutionEval:
     bounds_violation: float

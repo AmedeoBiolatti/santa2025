@@ -11,7 +11,7 @@ option(BUILD_PYTHON_BINDINGS "Build Python bindings with pybind11" ON)
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_EXAMPLES "Build examples" ON)
 option(ENABLE_SIMD "Enable SIMD optimizations (AVX2)" ON)
-option(ENABLE_OPENMP "Enable OpenMP parallelization" OFF)
+option(ENABLE_OPENMP "Enable OpenMP parallelization" ON)
 
 # Compiler flags
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -31,6 +31,9 @@ if(ENABLE_OPENMP)
     find_package(OpenMP)
     if(OpenMP_CXX_FOUND)
         message(STATUS "OpenMP found, enabling parallel execution")
+        # Set default thread count
+        set(OMP_NUM_THREADS 4 CACHE STRING "Default number of OpenMP threads")
+        message(STATUS "Default OMP_NUM_THREADS: ${OMP_NUM_THREADS}")
     else()
         message(WARNING "OpenMP not found, disabling parallel execution")
         set(ENABLE_OPENMP OFF)
@@ -51,7 +54,9 @@ add_library(tree_packing STATIC
     src/spatial/figure_hash2d.cpp
     src/geometry/sat.cpp
     src/geometry/intersection.cpp
+    src/geometry/utilities.cpp
     src/constraints/intersection.cpp
+    src/constraints/intersection_tree_filter.cpp
     src/constraints/bounds.cpp
     src/optimizers/optimizer.cpp
     src/optimizers/ruin.cpp
@@ -60,6 +65,7 @@ add_library(tree_packing STATIC
     src/optimizers/sa.cpp
     src/optimizers/combine.cpp
     src/optimizers/noise.cpp
+    src/optimizers/tighten.cpp
     src/random/rng.cpp
 )
 set_target_properties(tree_packing PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -71,7 +77,7 @@ target_include_directories(tree_packing PUBLIC
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(tree_packing PUBLIC OpenMP::OpenMP_CXX)
-    target_compile_definitions(tree_packing PUBLIC ENABLE_OPENMP)
+    target_compile_definitions(tree_packing PUBLIC ENABLE_OPENMP OMP_NUM_THREADS_DEFAULT=${OMP_NUM_THREADS})
 endif()
 
 if(ENABLE_SIMD)
@@ -117,8 +123,14 @@ if(BUILD_TESTS)
         tests/test_sat.cpp
         tests/test_grid2d.cpp
         tests/test_solution.cpp
+        tests/test_intersection_tree_filter.cpp
         tests/test_optimizers.cpp
         tests/test_incremental.cpp
+        tests/test_rollback_debug.cpp
+        tests/test_noise_debug.cpp
+        tests/test_sa_debug.cpp
+        tests/test_filter_exhaustive.cpp
+        tests/test_filter_analyze.cpp
     )
     target_link_libraries(test_tree_packing PRIVATE
         tree_packing
@@ -145,4 +157,16 @@ if(BUILD_EXAMPLES)
 
     add_executable(benchmark_grids examples/benchmark_grids.cpp)
     target_link_libraries(benchmark_grids PRIVATE tree_packing)
+
+    add_executable(solver_example examples/solver_example.cpp)
+    target_link_libraries(solver_example PRIVATE tree_packing)
+
+    add_executable(profile_solver examples/profile_solver.cpp)
+    target_link_libraries(profile_solver PRIVATE tree_packing)
+
+    add_executable(profile_solver_detailed examples/profile_solver_detailed.cpp)
+    target_link_libraries(profile_solver_detailed PRIVATE tree_packing)
+
+    add_executable(recompute_intersection_tree_leaf_pred examples/recompute_intersection_tree_leaf_pred.cpp)
+    target_link_libraries(recompute_intersection_tree_leaf_pred PRIVATE tree_packing)
 endif()

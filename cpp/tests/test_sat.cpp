@@ -1,6 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <algorithm>
+#include <cstddef>
 #include "tree_packing/geometry/sat.hpp"
+#include "tree_packing/geometry/utilities.hpp"
+#include "tree_packing/core/tree.hpp"
 
 using namespace tree_packing;
 using Catch::Approx;
@@ -135,5 +139,37 @@ TEST_CASE("Intersection matrix", "[sat]") {
         REQUIRE(matrix[1] == matrix[3]);
         REQUIRE(matrix[2] == matrix[6]);
         REQUIRE(matrix[5] == matrix[7]);
+    }
+}
+
+TEST_CASE("Triangle pair intersection scores utility", "[sat]") {
+    SECTION("Far apart trees produce all zeros") {
+        TreeParams a(Vec2(0.0f, 0.0f), 0.0f);
+        TreeParams b(Vec2(100.0f, 100.0f), 0.0f);
+
+        const auto scores = triangle_pair_intersection_scores(a, b);
+        for (size_t i = 0; i < TREE_NUM_TRIANGLES; ++i) {
+            for (size_t j = 0; j < TREE_NUM_TRIANGLES; ++j) {
+                REQUIRE(scores[i][j] == 0.0f);
+            }
+        }
+    }
+
+    SECTION("Sum of positive pair scores matches figure score") {
+        TreeParams a(Vec2(0.0f, 0.0f), 0.0f);
+        TreeParams b(Vec2(0.05f, 0.02f), 0.1f);
+
+        const auto scores = triangle_pair_intersection_scores(a, b);
+        float sum_pos = 0.0f;
+        for (size_t i = 0; i < TREE_NUM_TRIANGLES; ++i) {
+            for (size_t j = 0; j < TREE_NUM_TRIANGLES; ++j) {
+                sum_pos += std::max(0.0f, scores[i][j]);
+            }
+        }
+
+        const Figure fa = params_to_figure(a);
+        const Figure fb = params_to_figure(b);
+        const float figure_score = figure_intersection_score(fa, fb);
+        REQUIRE(sum_pos == Approx(figure_score).margin(1e-5f));
     }
 }

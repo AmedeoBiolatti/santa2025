@@ -41,6 +41,7 @@ public:
 
     [[nodiscard]] float best_score() const { return best_score_; }
     [[nodiscard]] float best_feasible_score() const { return best_feasible_score_; }
+    [[nodiscard]] float best_feasible_objective() const { return best_feasible_objective_; }
 
     [[nodiscard]] const TreeParamsSoA* best_params() const {
         return best_params_ ? &(*best_params_) : nullptr;
@@ -78,6 +79,7 @@ private:
 
     float best_score_{std::numeric_limits<float>::infinity()};
     float best_feasible_score_{std::numeric_limits<float>::infinity()};
+    float best_feasible_objective_{std::numeric_limits<float>::infinity()};
 
     std::optional<TreeParamsSoA> best_params_;
     std::optional<TreeParamsSoA> best_feasible_params_;

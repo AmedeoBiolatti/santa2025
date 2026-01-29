@@ -308,6 +308,14 @@ struct AABB {
         return min.x <= other.max.x && max.x >= other.min.x &&
                min.y <= other.max.y && max.y >= other.min.y;
     }
+
+    // Compute minimum L-infinity gap between two AABBs.
+    // Returns negative value if overlapping, positive if separated.
+    [[nodiscard]] float min_gap(const AABB& other) const {
+        float gap_x = std::max(other.min.x - max.x, min.x - other.max.x);
+        float gap_y = std::max(other.min.y - max.y, min.y - other.max.y);
+        return std::max(gap_x, gap_y);
+    }
 };
 
 // Constraint evaluation result

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "optimizer.hpp"
+#include "../solvers/solver.hpp"
 #include <vector>
 
 namespace tree_packing {
@@ -77,6 +78,129 @@ struct GridCellRecreateState {
     int iteration{0};
     std::vector<int> indices;
     std::vector<std::pair<int, int>> candidate_cells;
+    TreeParamsSoA new_params;
+};
+
+// SolverRecreate: uses a Solver to find optimal placements for removed trees
+class SolverRecreate : public Optimizer {
+public:
+    /**
+     * Create a recreate optimizer that uses a solver for placement optimization.
+     *
+     * @param solver The solver to use (ownership transferred)
+     * @param max_recreate Maximum number of trees to recreate per step
+     * @param num_samples Number of random initial positions to try per tree
+     * @param verbose Print debug info
+     */
+    explicit SolverRecreate(
+        SolverPtr solver,
+        int max_recreate = 1,
+        int num_samples = 16,
+        bool verbose = false
+    );
+
+    void set_problem(Problem* problem) override {
+        Optimizer::set_problem(problem);
+        if (solver_) {
+            solver_->set_problem(problem);
+        }
+    }
+
+    std::any init_state(const SolutionEval& solution) override;
+
+    void apply(
+        SolutionEval& solution,
+        std::any& state,
+        GlobalState& global_state,
+        RNG& rng
+    ) override;
+
+    [[nodiscard]] OptimizerPtr clone() const override;
+
+    // Access the underlying solver
+    [[nodiscard]] const Solver& solver() const { return *solver_; }
+    [[nodiscard]] Solver& solver() { return *solver_; }
+
+private:
+    SolverPtr solver_;
+    int max_recreate_;
+    int num_samples_;
+    bool verbose_;
+};
+
+// State for SolverRecreate
+struct SolverRecreateState {
+    int iteration{0};
+    std::vector<int> indices;
+    TreeParamsSoA new_params;
+    TreeParamsSoA sample_params;  // For multi-start sampling
+};
+
+// SolverOptimize: selects random valid trees and uses a Solver to find better placements
+// Unlike SolverRecreate, this doesn't require a ruin step first - it directly
+// optimizes existing tree placements.
+class SolverOptimize : public Optimizer {
+public:
+    /**
+     * Create an optimizer that uses a solver to improve existing placements.
+     *
+     * @param solver The solver to use (ownership transferred)
+     * @param max_optimize Maximum number of trees to optimize per step
+     * @param group_size Number of trees per solver call (1 or 2)
+     * @param same_cell_pairs If true and group_size==2, select pairs from the same grid cell
+     * @param num_samples Number of solver runs per tree (multi-start)
+     * @param verbose Print debug info
+     */
+    explicit SolverOptimize(
+        SolverPtr solver,
+        int max_optimize = 1,
+        int group_size = 1,
+        bool same_cell_pairs = false,
+        int num_samples = 8,
+        bool verbose = false
+    );
+
+    void set_problem(Problem* problem) override {
+        Optimizer::set_problem(problem);
+        if (solver_) {
+            solver_->set_problem(problem);
+        }
+    }
+
+    std::any init_state(const SolutionEval& solution) override;
+
+    void apply(
+        SolutionEval& solution,
+        std::any& state,
+        GlobalState& global_state,
+        RNG& rng
+    ) override;
+
+    [[nodiscard]] OptimizerPtr clone() const override;
+
+    // Access the underlying solver
+    [[nodiscard]] const Solver& solver() const { return *solver_; }
+    [[nodiscard]] Solver& solver() { return *solver_; }
+
+private:
+    SolverPtr solver_;
+    int max_optimize_;
+    int group_size_;
+    bool same_cell_pairs_;
+    int num_samples_;
+    bool verbose_;
+};
+
+// State for SolverOptimize
+struct SolverOptimizeState {
+    int iteration{0};
+    std::vector<int> indices;
+    std::vector<int> valid_indices;  // Scratch buffer for valid tree indices
+    std::vector<std::pair<int, int>> candidate_cells; // Cells with >=2 eligible trees
+    std::vector<Index> cell_items;   // Scratch buffer for cell contents
+    std::vector<int> cell_valid;     // Scratch buffer for eligible trees in a cell
+    std::vector<char> used_flags;    // Tracks trees already selected this step
+    TreeParamsSoA old_params;        // For rollback
     TreeParamsSoA new_params;
 };
 
