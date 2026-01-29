@@ -7,9 +7,9 @@ using namespace tree_packing;
 
 // Use relative tolerance for floating point comparison
 // With many small values accumulating in different orders, expect ~0.01% relative difference
-bool scores_match(float a, float b, float rel_tol = 1e-4f, float abs_tol = 1e-4f) {
-    float diff = std::abs(a - b);
-    float max_val = std::max(std::abs(a), std::abs(b));
+bool scores_match(double a, double b, double rel_tol = 1e-4, double abs_tol = 1e-4) {
+    double diff = std::abs(a - b);
+    double max_val = std::max(std::abs(a), std::abs(b));
     return diff <= abs_tol || diff <= max_val * rel_tol;
 }
 
@@ -30,8 +30,8 @@ int main() {
     SolutionEval::IntersectionMap map1, map2;
     int count1 = 0, count2 = 0;
 
-    float score1 = constraint.eval(solution, map1, &count1);
-    float score2 = constraint.eval_triangle_grid(solution, map2, &count2);
+    double score1 = constraint.eval(solution, map1, &count1);
+    double score2 = constraint.eval_triangle_grid(solution, map2, &count2);
 
     std::cout << "Figure grid:   score=" << score1 << " count=" << count1 << std::endl;
     std::cout << "Triangle grid: score=" << score2 << " count=" << count2 << std::endl;
@@ -58,8 +58,8 @@ int main() {
     SolutionEval::IntersectionMap map3, map4;
     int count3 = 0, count4 = 0;
 
-    float score3 = constraint.eval(updated, map3, &count3);
-    float score4 = constraint.eval_triangle_grid(updated, map4, &count4);
+    double score3 = constraint.eval(updated, map3, &count3);
+    double score4 = constraint.eval_triangle_grid(updated, map4, &count4);
 
     std::cout << "Figure grid:   score=" << score3 << " count=" << count3 << std::endl;
     std::cout << "Triangle grid: score=" << score4 << " count=" << count4 << std::endl;
@@ -75,8 +75,8 @@ int main() {
     SolutionEval::IntersectionMap map6 = map2;
     int count5 = count1, count6 = count2;
 
-    float score5 = constraint.eval_update(updated, map5, modified, score1, count1, &count5);
-    float score6 = constraint.eval_update_triangle_grid(updated, map6, modified, score2, count2, &count6);
+    double score5 = constraint.eval_update(updated, map5, modified, score1, count1, &count5);
+    double score6 = constraint.eval_update_triangle_grid(updated, map6, modified, score2, count2, &count6);
 
     std::cout << "Figure grid incremental:   score=" << score5 << " count=" << count5 << std::endl;
     std::cout << "Triangle grid incremental: score=" << score6 << " count=" << count6 << std::endl;
