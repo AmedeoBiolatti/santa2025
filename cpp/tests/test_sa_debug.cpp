@@ -11,6 +11,16 @@
 using namespace tree_packing;
 using Catch::Approx;
 
+#ifndef INTERSECTION_DEBUG_LOGS
+#define INTERSECTION_DEBUG_LOGS 0
+#endif
+
+#if INTERSECTION_DEBUG_LOGS
+#define INTERSECTION_LOG(...) do { __VA_ARGS__; } while (0)
+#else
+#define INTERSECTION_LOG(...) do {} while (0)
+#endif
+
 static std::map<std::pair<int,int>, float> build_violation_map_sa(const SolutionEval::IntersectionMap& imap) {
     std::map<std::pair<int,int>, float> result;
     for (size_t i = 0; i < imap.size(); ++i) {
@@ -52,9 +62,9 @@ TEST_CASE("Debug SA ALNS zero temp", "[debug-sa]") {
     float prev_score = problem.score(eval, global_state);
     auto prev_violations = build_violation_map_sa(eval.intersection_map);
 
-    std::cout << "\n=== INITIAL STATE ===" << std::endl;
-    std::cout << "Score: " << prev_score << std::endl;
-    std::cout << "Intersection pairs: " << prev_violations.size() << std::endl;
+    INTERSECTION_LOG(std::cout << "\n=== INITIAL STATE ===" << std::endl);
+    INTERSECTION_LOG(std::cout << "Score: " << prev_score << std::endl);
+    INTERSECTION_LOG(std::cout << "Intersection pairs: " << prev_violations.size() << std::endl);
 
     IntersectionTreeFilter filter;
 
@@ -68,10 +78,10 @@ TEST_CASE("Debug SA ALNS zero temp", "[debug-sa]") {
         auto current_violations = build_violation_map_sa(eval.intersection_map);
 
         if (current_score > prev_score + 1e-6f) {
-            std::cout << std::fixed << std::setprecision(8);
-            std::cout << "\n=== SCORE INCREASED at iter " << iter << " ===" << std::endl;
-            std::cout << "Prev score: " << prev_score << ", Current score: " << current_score << std::endl;
-            std::cout << "Difference: " << (current_score - prev_score) << std::endl;
+            INTERSECTION_LOG(std::cout << std::fixed << std::setprecision(8));
+            INTERSECTION_LOG(std::cout << "\n=== SCORE INCREASED at iter " << iter << " ===" << std::endl);
+            INTERSECTION_LOG(std::cout << "Prev score: " << prev_score << ", Current score: " << current_score << std::endl);
+            INTERSECTION_LOG(std::cout << "Difference: " << (current_score - prev_score) << std::endl);
 
             // Find differing violations
             std::set<std::pair<int,int>> all_pairs;
@@ -86,30 +96,32 @@ TEST_CASE("Debug SA ALNS zero temp", "[debug-sa]") {
                     int i = pair.first;
                     int j = pair.second;
 
-                    std::cout << "\nPair (" << i << ", " << j << "):" << std::endl;
-                    std::cout << "  Prev violation: " << pv << ", Current: " << cv << std::endl;
+                    INTERSECTION_LOG(std::cout << "\nPair (" << i << ", " << j << "):" << std::endl);
+                    INTERSECTION_LOG(std::cout << "  Prev violation: " << pv << ", Current: " << cv << std::endl);
 
                     if (eval.solution.is_valid(i) && eval.solution.is_valid(j)) {
                         TreeParams pa = eval.solution.get_params(i);
                         TreeParams pb = eval.solution.get_params(j);
-                        std::cout << "  Tree " << i << ": pos=(" << pa.pos.x << ", " << pa.pos.y << "), angle=" << pa.angle << std::endl;
-                        std::cout << "  Tree " << j << ": pos=(" << pb.pos.x << ", " << pb.pos.y << "), angle=" << pb.angle << std::endl;
+                        INTERSECTION_LOG(std::cout << "  Tree " << i << ": pos=(" << pa.pos.x << ", " << pa.pos.y << "), angle=" << pa.angle << std::endl);
+                        INTERSECTION_LOG(std::cout << "  Tree " << j << ": pos=(" << pb.pos.x << ", " << pb.pos.y << "), angle=" << pb.angle << std::endl);
 
                         int leaf_ij = filter.leaf_index_for(eval.solution, i, j);
                         int leaf_ji = filter.leaf_index_for(eval.solution, j, i);
-                        std::cout << "  Leaf (i,j)=" << leaf_ij << ", Leaf (j,i)=" << leaf_ji << std::endl;
+                        INTERSECTION_LOG(std::cout << "  Leaf (i,j)=" << leaf_ij << ", Leaf (j,i)=" << leaf_ji << std::endl);
 
                         std::array<uint8_t, 16> pred_ij, pred_ji;
                         filter.leaf_pred_for(eval.solution, i, j, pred_ij);
                         filter.leaf_pred_for(eval.solution, j, i, pred_ji);
 
-                        std::cout << "  Targets (i,j):";
-                        for (int t = 0; t < 16; ++t) if (pred_ij[t]) std::cout << " " << t;
-                        std::cout << std::endl;
+                        INTERSECTION_LOG(std::cout << "  Targets (i,j):");
+                        for (int t = 0; t < 16; ++t)
+                            INTERSECTION_LOG(if (pred_ij[t]) std::cout << " " << t);
+                        INTERSECTION_LOG(std::cout << std::endl);
 
-                        std::cout << "  Targets (j,i):";
-                        for (int t = 0; t < 16; ++t) if (pred_ji[t]) std::cout << " " << t;
-                        std::cout << std::endl;
+                        INTERSECTION_LOG(std::cout << "  Targets (j,i):");
+                        for (int t = 0; t < 16; ++t)
+                            INTERSECTION_LOG(if (pred_ji[t]) std::cout << " " << t);
+                        INTERSECTION_LOG(std::cout << std::endl);
 
                         // Ground truth
                         Figure fig_i = params_to_figure(pa);
@@ -120,11 +132,11 @@ TEST_CASE("Debug SA ALNS zero temp", "[debug-sa]") {
                                 float score = triangles_intersection_score(fig_i[ti], fig_j[tj]);
                                 if (score > 0.0f) {
                                     ground_truth += score;
-                                    std::cout << "  tri[" << ti << "] x tri[" << tj << "] = " << score << std::endl;
+                                    INTERSECTION_LOG(std::cout << "  tri[" << ti << "] x tri[" << tj << "] = " << score << std::endl);
                                 }
                             }
                         }
-                        std::cout << "  Ground truth: " << ground_truth << " (capped: " << std::min(ground_truth, 0.15f) << ")" << std::endl;
+                        INTERSECTION_LOG(std::cout << "  Ground truth: " << ground_truth << " (capped: " << std::min(ground_truth, 0.15f) << ")" << std::endl);
                     }
                 }
             }
@@ -138,5 +150,5 @@ TEST_CASE("Debug SA ALNS zero temp", "[debug-sa]") {
         global_state.next();
     }
 
-    std::cout << "\n=== ALL 50 ITERATIONS PASSED ===" << std::endl;
+    INTERSECTION_LOG(std::cout << "\n=== ALL 50 ITERATIONS PASSED ===" << std::endl);
 }

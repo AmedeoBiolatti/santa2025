@@ -462,7 +462,7 @@ TEST_CASE("Incremental eval keeps intersection map consistent", "[incremental]")
 
     IntersectionConstraint constraint;
     SolutionEval::IntersectionMap map;
-    float violation = constraint.eval(updated, map);
+    double violation = constraint.eval(updated, map);
     REQUIRE(inc.intersection_violation == Approx(violation).margin(1e-4f));
     require_maps_equal(inc.intersection_map, map);
     require_eval_matches_full(problem, updated, inc);
@@ -493,7 +493,7 @@ TEST_CASE("Update and eval keeps intersection map consistent", "[incremental]") 
 
     IntersectionConstraint constraint;
     SolutionEval::IntersectionMap map;
-    float violation = constraint.eval(updated, map);
+    double violation = constraint.eval(updated, map);
     REQUIRE(eval.intersection_violation == Approx(violation).margin(1e-4f));
     require_maps_equal(eval.intersection_map, map);
     require_cache_valid(eval.solution);
