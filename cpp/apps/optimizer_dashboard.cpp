@@ -18,8 +18,10 @@
 #include <limits>
 #include <variant>
 #include <vector>
+#include <functional>
 
 #include "tree_packing/tree_packing.hpp"
+#include "tree_packing/solvers/noise_solver.hpp"
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -153,7 +155,7 @@ struct ViewCache {
 };
 
 struct RunConfig {
-    int num_trees = 67;
+    int num_trees = 27;
     float side = 10.0f;
     uint64_t seed = 42;
     int metrics_stride = 100;
@@ -244,7 +246,8 @@ enum class OptType {
     Repeat,
     Conditional,
     ALNS,
-    SimulatedAnnealing
+    SimulatedAnnealing,
+    SolverOptimize
 };
 
 struct RandomRuinParams { int n_remove = 1; };
@@ -266,6 +269,12 @@ struct SAParams {
     float cooling_rate = 0.9995f;
     int patience = -1;
 };
+struct SolverOptimizeParams {
+    int max_optimize = 1;
+    int group_size = 1;
+    bool same_cell_pairs = false;
+    int num_samples = 8;
+};
 
 using OptParams = std::variant<
     std::monostate,
@@ -281,7 +290,8 @@ using OptParams = std::variant<
     RepeatParams,
     ConditionalParams,
     ALNSParams,
-    SAParams
+    SAParams,
+    SolverOptimizeParams
 >;
 
 struct OptConfig {
@@ -344,6 +354,7 @@ const char* opt_type_name(OptType type) {
         case OptType::Conditional: return "Conditional";
         case OptType::ALNS: return "ALNS";
         case OptType::SimulatedAnnealing: return "SimulatedAnnealing";
+        case OptType::SolverOptimize: return "SolverOptimize";
         default: return "Unknown";
     }
 }
@@ -376,6 +387,109 @@ OptConfig default_optimizer_config() {
     sa.children = {alternate};
 
     return sa;
+}
+
+struct OptimizerPreset {
+    const char* name = "Unknown";
+    OptConfig config;
+};
+
+const std::vector<OptimizerPreset>& optimizer_presets() {
+    static const std::vector<OptimizerPreset> presets = []() {
+        std::vector<OptimizerPreset> out;
+
+        OptimizerPreset sa_preset;
+        sa_preset.name = "SimulatedAnnealing (default)";
+        sa_preset.config = default_optimizer_config();
+        out.push_back(sa_preset);
+
+        OptimizerPreset alns_preset;
+        {
+            OptConfig ruin;
+            ruin.type = OptType::RandomRuin;
+            ruin.params = RandomRuinParams{1};
+            OptConfig recreate;
+            recreate.type = OptType::RandomRecreate;
+            recreate.params = RandomRecreateParams{1, 5.0f, 0.35f};
+            OptConfig alns;
+            alns.type = OptType::ALNS;
+            alns.params = ALNSParams{0.01f, 1.0f, 0.0f, 1e-3f};
+            alns.ruin_children = {ruin};
+            alns.recreate_children = {recreate};
+            alns_preset.name = "ALNS (ruin + recreate)";
+            alns_preset.config = alns;
+        }
+        out.push_back(alns_preset);
+
+        OptimizerPreset noise_preset;
+        noise_preset.name = "NoiseOptimizer";
+        noise_preset.config.type = OptType::Noise;
+        noise_preset.config.params = NoiseParams{0.01f, 1};
+        out.push_back(noise_preset);
+
+        OptimizerPreset compaction_preset;
+        compaction_preset.name = "CompactionOptimizer";
+        compaction_preset.config.type = OptType::Compaction;
+        compaction_preset.config.params = CompactionParams{10};
+        out.push_back(compaction_preset);
+
+        OptimizerPreset local_search_preset;
+        local_search_preset.name = "LocalSearchOptimizer";
+        local_search_preset.config.type = OptType::LocalSearch;
+        local_search_preset.config.params = LocalSearchParams{10};
+        out.push_back(local_search_preset);
+
+        OptimizerPreset solver_opt_preset;
+        solver_opt_preset.name = "SolverOptimize (NoiseSolver)";
+        solver_opt_preset.config.type = OptType::SolverOptimize;
+        solver_opt_preset.config.params = SolverOptimizeParams{1, 1, false, 8};
+        out.push_back(solver_opt_preset);
+
+        return out;
+    }();
+    return presets;
+}
+
+using OptimizerPresetApplyCallback = std::function<void()>;
+OptimizerPresetApplyCallback g_optimizer_preset_apply_callback;
+
+void set_optimizer_preset_apply_callback(OptimizerPresetApplyCallback cb) {
+    g_optimizer_preset_apply_callback = std::move(cb);
+}
+
+void clear_optimizer_preset_apply_callback() {
+    g_optimizer_preset_apply_callback = nullptr;
+}
+
+void notify_optimizer_preset_applied() {
+    if (g_optimizer_preset_apply_callback) {
+        g_optimizer_preset_apply_callback();
+    }
+}
+
+bool render_optimizer_preset_combo(const char* label, OptConfig& cfg, bool enabled) {
+    const auto& presets = optimizer_presets();
+    if (presets.empty()) {
+        return false;
+    }
+    if (!enabled) {
+        ImGui::BeginDisabled();
+    }
+    bool applied = false;
+    if (ImGui::BeginCombo(label, "Select preset")) {
+        for (const auto& preset : presets) {
+            if (ImGui::Selectable(preset.name)) {
+                cfg = preset.config;
+                applied = true;
+                notify_optimizer_preset_applied();
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (!enabled) {
+        ImGui::EndDisabled();
+    }
+    return applied;
 }
 
 OptimizerPtr build_optimizer(const OptConfig& cfg) {
@@ -417,6 +531,17 @@ OptimizerPtr build_optimizer(const OptConfig& cfg) {
         case OptType::RestoreBest: {
             const auto& p = std::get<RestoreBestParams>(cfg.params);
             return std::make_unique<RestoreBest>(p.interval, cfg.verbose);
+        }
+        case OptType::SolverOptimize: {
+            const auto& p = std::get<SolverOptimizeParams>(cfg.params);
+            return std::make_unique<SolverOptimize>(
+                std::make_unique<NoiseSolver>(),
+                p.max_optimize,
+                p.group_size,
+                p.same_cell_pairs,
+                p.num_samples,
+                cfg.verbose
+            );
         }
         case OptType::Chain: {
             std::vector<OptimizerPtr> children;
@@ -514,21 +639,22 @@ OptimizerPtr build_optimizer(const OptConfig& cfg) {
 }
 
 struct MetricsSnapshot;
-bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool* reset_sa_temp = nullptr);
+bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool* reset_sa_temp = nullptr, bool allow_preset_combo = true, bool presets_enabled = true);
 
 bool edit_children(
     const char* label,
     std::vector<OptConfig>& children,
     const MetricsSnapshot* metrics,
     bool show_root = true,
-    bool* reset_sa_temp = nullptr
+    bool* reset_sa_temp = nullptr,
+    bool presets_enabled = true
 ) {
     bool changed = false;
     auto render_children = [&]() {
         for (size_t i = 0; i < children.size(); ++i) {
             std::string node_label = std::string(opt_type_name(children[i].type)) + "##" + std::to_string(i);
             if (ImGui::TreeNode(node_label.c_str())) {
-                changed |= edit_optimizer_config(children[i], metrics, reset_sa_temp);
+                changed |= edit_optimizer_config(children[i], metrics, reset_sa_temp, true, presets_enabled);
                 ImGui::TreePop();
             }
         }
@@ -619,9 +745,15 @@ bool apply_mouse_wheel_uint64(uint64_t& value, uint64_t step = 1, uint64_t min_v
     return true;
 }
 
-bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool* reset_sa_temp) {
+bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool* reset_sa_temp, bool allow_preset_combo, bool presets_enabled) {
     bool changed = false;
+    ImGui::PushID(&cfg);
     ImGui::TextUnformatted(opt_type_name(cfg.type));
+    if (allow_preset_combo) {
+        bool applied = render_optimizer_preset_combo("Preset", cfg, presets_enabled);
+        changed |= applied;
+        ImGui::Spacing();
+    }
     changed |= ImGui::Checkbox("Verbose", &cfg.verbose);
 
     switch (cfg.type) {
@@ -693,6 +825,17 @@ bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool*
             changed |= apply_mouse_wheel_int(p.iters_per_tree, 1, 1);
             break;
         }
+        case OptType::SolverOptimize: {
+            auto& p = std::get<SolverOptimizeParams>(cfg.params);
+            changed |= ImGui::InputInt("max_optimize", &p.max_optimize);
+            changed |= apply_mouse_wheel_int(p.max_optimize, 1, 1);
+            changed |= ImGui::InputInt("group_size", &p.group_size);
+            changed |= apply_mouse_wheel_int(p.group_size, 1, 1, 2);
+            changed |= ImGui::Checkbox("same_cell_pairs", &p.same_cell_pairs);
+            changed |= ImGui::InputInt("num_samples", &p.num_samples);
+            changed |= apply_mouse_wheel_int(p.num_samples, 1, 1);
+            break;
+        }
         case OptType::RestoreBest: {
             auto& p = std::get<RestoreBestParams>(cfg.params);
             changed |= ImGui::InputInt("interval", &p.interval);
@@ -703,7 +846,7 @@ bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool*
             auto& p = std::get<RepeatParams>(cfg.params);
             changed |= ImGui::InputInt("n", &p.n);
             changed |= apply_mouse_wheel_int(p.n, 1, 1);
-            changed |= edit_children("Inner", cfg.children, metrics, true, reset_sa_temp);
+            changed |= edit_children("Inner", cfg.children, metrics, true, reset_sa_temp, presets_enabled);
             break;
         }
         case OptType::Conditional: {
@@ -714,7 +857,7 @@ bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool*
             changed |= apply_mouse_wheel_uint64(p.min_iters_since_improvement);
             changed |= ImGui::InputScalar("min_iters_since_feasible_improvement", ImGuiDataType_U64, &p.min_iters_since_feasible_improvement);
             changed |= apply_mouse_wheel_uint64(p.min_iters_since_feasible_improvement);
-            changed |= edit_children("Inner", cfg.children, metrics, true, reset_sa_temp);
+            changed |= edit_children("Inner", cfg.children, metrics, true, reset_sa_temp, presets_enabled);
             break;
         }
         case OptType::ALNS: {
@@ -727,8 +870,8 @@ bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool*
             changed |= apply_mouse_wheel_float(p.reward_no_improve, 0.1f, 0.0f);
             changed |= ImGui::InputFloat("min_weight", &p.min_weight, 0.0f, 0.0f, "%.6f");
             changed |= apply_mouse_wheel_float(p.min_weight, 0.01f, 0.0f);
-            changed |= edit_children("Ruin Operators", cfg.ruin_children, metrics, true, reset_sa_temp);
-            changed |= edit_children("Recreate Operators", cfg.recreate_children, metrics, true, reset_sa_temp);
+            changed |= edit_children("Ruin Operators", cfg.ruin_children, metrics, true, reset_sa_temp, presets_enabled);
+            changed |= edit_children("Recreate Operators", cfg.recreate_children, metrics, true, reset_sa_temp, presets_enabled);
             break;
         }
         case OptType::SimulatedAnnealing: {
@@ -755,25 +898,25 @@ bool edit_optimizer_config(OptConfig& cfg, const MetricsSnapshot* metrics, bool*
                     *reset_sa_temp = true;
                 }
             }
-            if (metrics && metrics->has_sa) {
-                ImGui::Separator();
-                ImGui::TextUnformatted("Runtime stats");
-                ImGui::Text("Temp: %.6f", metrics->sa_temperature);
-                ImGui::Text("Accept rate: %.2f%%", metrics->sa_accept_rate * 100.0f);
-                ImGui::Text("Last prob: %.3f", metrics->sa_last_accept_prob);
-                ImGui::Text("Last: %s", metrics->sa_last_accept ? "accept" : "reject");
-                ImGui::Text("Accepted: %llu", static_cast<unsigned long long>(metrics->sa_accepted));
-                ImGui::Text("Rejected: %llu", static_cast<unsigned long long>(metrics->sa_rejected));
+    if (metrics && metrics->has_sa) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("Runtime stats");
+        ImGui::Text("Temp: %.6f", metrics->sa_temperature);
+        ImGui::Text("Accept rate: %.2f%%", metrics->sa_accept_rate * 100.0f);
+        ImGui::Text("Last prob: %.3f", metrics->sa_last_accept_prob);
+        ImGui::Text("Last: %s", metrics->sa_last_accept ? "accept" : "reject");
+        ImGui::Text("Accepted: %llu", static_cast<unsigned long long>(metrics->sa_accepted));
+        ImGui::Text("Rejected: %llu", static_cast<unsigned long long>(metrics->sa_rejected));
                 ImGui::Text("SA iter: %d", metrics->sa_iteration);
             }
-            changed |= edit_children("Inner", cfg.children, metrics, false, reset_sa_temp);
+            changed |= edit_children("Inner", cfg.children, metrics, false, reset_sa_temp, presets_enabled);
             break;
         }
         default:
-            changed |= edit_children("Children", cfg.children, metrics, true, reset_sa_temp);
+            changed |= edit_children("Children", cfg.children, metrics, true, reset_sa_temp, presets_enabled);
             break;
     }
-
+    ImGui::PopID();
     return changed;
 }
 
@@ -1373,6 +1516,7 @@ int main() {
     RunConfig run_cfg;
     OptConfig current_config = default_optimizer_config();
     OptConfig pending_config = current_config;
+    int optimizer_preset_idx = 0;
     ProblemParams current_problem_params;
     ProblemParams pending_problem_params = current_problem_params;
 
@@ -1398,6 +1542,14 @@ int main() {
         std::cref(run_cfg)
     );
 
+    auto apply_pending_config = [&](float resume_temp) {
+        sa_resume_temperature.store(resume_temp, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(config_mutex);
+        current_config = pending_config;
+        current_problem_params = pending_problem_params;
+        rebuild_requested.store(true, std::memory_order_relaxed);
+    };
+
     const int history_iters = 10'000'000;
     const int history_points = std::max(1024, history_iters / std::max(1, run_cfg.metrics_stride));
     PlotSeries objective_series(history_points, "Objective");
@@ -1412,6 +1564,14 @@ int main() {
     MetricsSnapshot latest_metrics;
     bool has_metrics = false;
     std::string save_best_status;
+    set_optimizer_preset_apply_callback([&]() {
+        float temp = std::numeric_limits<float>::quiet_NaN();
+        if (has_metrics && latest_metrics.has_sa) {
+            temp = latest_metrics.sa_temperature;
+        }
+        apply_pending_config(temp);
+        optimizer_preset_idx = -1;
+    });
 
     const auto frame_interval = std::chrono::milliseconds(33);
     const auto metrics_interval = std::chrono::milliseconds(167);
@@ -1704,10 +1864,41 @@ int main() {
             }
             ImGui::Text("Objective formula: side² / num_trees (side %.6f, trees %d)", run_cfg.side, run_cfg.num_trees);
         }
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Optimizer presets");
+        const auto& presets = optimizer_presets();
+        const char* preset_label = "Custom";
+        if (optimizer_preset_idx >= 0 && optimizer_preset_idx < static_cast<int>(presets.size())) {
+            preset_label = presets[optimizer_preset_idx].name;
+        }
+        ImGui::BeginDisabled(!is_paused);
+        if (ImGui::BeginCombo("##OptimizerPreset", preset_label)) {
+            for (int i = 0; i < static_cast<int>(presets.size()); ++i) {
+                bool selected = optimizer_preset_idx == i;
+                if (ImGui::Selectable(presets[i].name, selected)) {
+                    pending_config = presets[i].config;
+                    optimizer_preset_idx = i;
+                    apply_pending_config(std::numeric_limits<float>::quiet_NaN());
+                }
+                if (selected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::EndDisabled();
+        if (!is_paused) {
+            ImGui::TextDisabled("(pause to swap optimizer presets)");
+        }
+        ImGui::Separator();
         bool reset_sa_temp_request = false;
+        bool config_tree_changed = false;
         if (ImGui::TreeNode("Config")) {
-            edit_optimizer_config(pending_config, has_metrics ? &latest_metrics : nullptr, &reset_sa_temp_request);
+            config_tree_changed = edit_optimizer_config(pending_config, has_metrics ? &latest_metrics : nullptr, &reset_sa_temp_request, false, is_paused);
             ImGui::TreePop();
+        }
+        if (config_tree_changed) {
+            optimizer_preset_idx = -1;
         }
         if (reset_sa_temp_request) {
             std::lock_guard<std::mutex> reset_lock(config_mutex);
@@ -1721,11 +1912,8 @@ int main() {
             if (has_metrics && latest_metrics.has_sa) {
                 temp = latest_metrics.sa_temperature;
             }
-            sa_resume_temperature.store(temp, std::memory_order_relaxed);
-            std::lock_guard<std::mutex> lock(config_mutex);
-            current_config = pending_config;
-            current_problem_params = pending_problem_params;
-            rebuild_requested.store(true, std::memory_order_relaxed);
+            apply_pending_config(temp);
+            optimizer_preset_idx = -1;
         }
         ImGui::EndChild();
 
@@ -1741,6 +1929,8 @@ int main() {
         ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
     }
+
+    clear_optimizer_preset_apply_callback();
 
     shutdown.store(true, std::memory_order_relaxed);
     if (worker.joinable()) {
