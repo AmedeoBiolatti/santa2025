@@ -39,8 +39,9 @@ void GlobalState::next() {
 }
 
 void GlobalState::maybe_update_best(const Problem& problem, const SolutionEval& solution) {
-    float violation = solution.total_violation();
-    bool is_feasible = violation < tol_;
+    double violation = solution.total_violation();
+    // Best feasible should always respect the default feasibility tolerance.
+    bool meets_default_tolerance = violation < static_cast<double>(default_tolerance());
     float score = problem.score(solution, *this);
 
     // Update best overall (only copy params, not the full solution)
@@ -50,10 +51,12 @@ void GlobalState::maybe_update_best(const Problem& problem, const SolutionEval& 
         iters_since_improvement_ = 0;
     }
 
+    float feasible_objective = solution.objective;
+
     // Update best feasible (only copy params)
-    if (is_feasible && score < best_feasible_score_) {
-        best_feasible_score_ = score;
-        best_feasible_objective_ = solution.objective;
+    if (meets_default_tolerance && feasible_objective < best_feasible_score_) {
+        best_feasible_score_ = feasible_objective;
+        best_feasible_objective_ = feasible_objective;
         best_feasible_params_ = solution.solution.params();
         iters_since_feasible_improvement_ = 0;
     }

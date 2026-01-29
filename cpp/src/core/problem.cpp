@@ -122,7 +122,7 @@ float Problem::objective(const Solution& solution) const {
     return (length * length) / static_cast<float>(n);
 }
 
-float Problem::intersection_constraint(const Solution& solution) const {
+double Problem::intersection_constraint(const Solution& solution) const {
     SolutionEval::IntersectionMap map;
     return intersection_constraint_.eval(solution, map);
 }

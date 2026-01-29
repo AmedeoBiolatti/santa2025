@@ -206,7 +206,7 @@ float IntersectionConstraint::compute_pair_score_from_normals_per_triangle(
     return total;
 }
 
-float IntersectionConstraint::eval(
+double IntersectionConstraint::eval(
     const Solution& solution,
     SolutionEval::IntersectionMap& map,
     int* out_count
@@ -230,7 +230,7 @@ float IntersectionConstraint::eval(
         row.reserve(reserve_size);
     }
 
-    float total_violation = 0.0f;
+    double total_violation = 0.0;
     int count = 0;
 
     for (size_t i = 0; i < n; ++i) {
@@ -277,11 +277,11 @@ float IntersectionConstraint::eval(
     return total_violation;
 }
 
-float IntersectionConstraint::eval_update(
+double IntersectionConstraint::eval_update(
     const Solution& solution,
     SolutionEval::IntersectionMap& map,
     const std::vector<int>& modified_indices,
-    float prev_total,
+    double prev_total,
     int prev_count,
     int* out_count
 ) const {
@@ -293,7 +293,7 @@ float IntersectionConstraint::eval_update(
     const auto& new_grid = solution.grid();
     size_t n = solution.figures().size();
 
-    float total = prev_total;
+    double total = prev_total;
     int count = prev_count;
     modified_.clear();
 
@@ -380,11 +380,11 @@ float IntersectionConstraint::eval_update(
     return total;
 }
 
-float IntersectionConstraint::eval_remove(
+double IntersectionConstraint::eval_remove(
     const Solution& solution,
     SolutionEval::IntersectionMap& map,
     const std::vector<int>& removed_indices,
-    float prev_total,
+    double prev_total,
     int prev_count,
     int* out_count
 ) const {
@@ -393,7 +393,7 @@ float IntersectionConstraint::eval_remove(
         map.resize(n);
     }
 
-    float total = prev_total;
+    double total = prev_total;
     int count = prev_count;
     int reserve_size = static_cast<int>(NEIGHBOR_DELTAS.size()) * solution.grid().capacity();
 
@@ -433,7 +433,7 @@ float IntersectionConstraint::eval_remove(
 
 // ============ Figure Hash Based Methods ============
 
-float IntersectionConstraint::eval_figure_hash(
+double IntersectionConstraint::eval_figure_hash(
     const Solution& solution,
     SolutionEval::IntersectionMap& map,
     int* out_count
@@ -504,11 +504,11 @@ float IntersectionConstraint::eval_figure_hash(
     return total_violation;
 }
 
-float IntersectionConstraint::eval_update_figure_hash(
+double IntersectionConstraint::eval_update_figure_hash(
     const Solution& solution,
     SolutionEval::IntersectionMap& map,
     const std::vector<int>& modified_indices,
-    float prev_total,
+    double prev_total,
     int prev_count,
     int* out_count
 ) const {
@@ -520,7 +520,7 @@ float IntersectionConstraint::eval_update_figure_hash(
     const auto& fig_hash = solution.figure_hash();
     size_t n = solution.figures().size();
 
-    float total = prev_total;
+    double total = prev_total;
     int count = prev_count;
     modified_.clear();
 
@@ -605,11 +605,11 @@ float IntersectionConstraint::eval_update_figure_hash(
     return total;
 }
 
-float IntersectionConstraint::eval_remove_figure_hash(
+double IntersectionConstraint::eval_remove_figure_hash(
     const Solution& solution,
     SolutionEval::IntersectionMap& map,
     const std::vector<int>& removed_indices,
-    float prev_total,
+    double prev_total,
     int prev_count,
     int* out_count
 ) const {
