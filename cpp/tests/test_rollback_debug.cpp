@@ -219,7 +219,7 @@ TEST_CASE("Debug rollback violation differences", "[debug]") {
 
     // Store original violation map
     auto original_violations = build_violation_map(eval.intersection_map);
-    float original_total_violation = eval.intersection_violation;
+    double original_total_violation = eval.intersection_violation;
 
     std::cout << "\n=== ORIGINAL STATE ===" << std::endl;
     std::cout << "Score: " << original_score << std::endl;
@@ -261,7 +261,7 @@ TEST_CASE("Debug rollback violation differences", "[debug]") {
 
     // Get restored state
     auto restored_violations = build_violation_map(eval.intersection_map);
-    float restored_total_violation = eval.intersection_violation;
+    double restored_total_violation = eval.intersection_violation;
     float restored_score = problem.score(eval, GlobalState(42));
 
     std::cout << "\n=== RESTORED STATE ===" << std::endl;

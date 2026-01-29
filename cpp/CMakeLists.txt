@@ -10,6 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(BUILD_PYTHON_BINDINGS "Build Python bindings with pybind11" ON)
 option(BUILD_TESTS "Build unit tests" ON)
 option(BUILD_EXAMPLES "Build examples" ON)
+option(BUILD_DASHBOARD "Build ImGui optimizer dashboard" OFF)
 option(ENABLE_SIMD "Enable SIMD optimizations (AVX2)" ON)
 option(ENABLE_OPENMP "Enable OpenMP parallelization" ON)
 
@@ -54,6 +55,7 @@ add_library(tree_packing STATIC
     src/spatial/figure_hash2d.cpp
     src/geometry/sat.cpp
     src/geometry/intersection.cpp
+    src/geometry/intersection_score.cpp
     src/geometry/utilities.cpp
     src/constraints/intersection.cpp
     src/constraints/intersection_tree_filter.cpp
@@ -169,4 +171,50 @@ if(BUILD_EXAMPLES)
 
     add_executable(recompute_intersection_tree_leaf_pred examples/recompute_intersection_tree_leaf_pred.cpp)
     target_link_libraries(recompute_intersection_tree_leaf_pred PRIVATE tree_packing)
+
+    add_executable(intersection_filtering experiments/intersection_filtering.cpp)
+    target_link_libraries(intersection_filtering PRIVATE tree_packing)
+endif()
+
+# Dashboard (ImGui)
+if(BUILD_DASHBOARD)
+    include(FetchContent)
+
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG        v1.90.4
+    )
+
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG        3.3.9
+    )
+
+    FetchContent_MakeAvailable(imgui glfw)
+
+    find_package(OpenGL REQUIRED)
+
+    add_library(imgui_lib STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl2.cpp
+    )
+    target_include_directories(imgui_lib PUBLIC
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
+    )
+    target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
+
+    add_executable(optimizer_dashboard apps/optimizer_dashboard.cpp)
+    target_link_libraries(optimizer_dashboard PRIVATE tree_packing imgui_lib glfw OpenGL::GL)
 endif()

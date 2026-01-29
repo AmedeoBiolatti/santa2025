@@ -29,8 +29,8 @@ static bool solutions_match(const Solution& a, const Solution& b, float tol = 1e
 // Debug struct to save full state for validation
 struct DebugSavedState {
     Solution solution;
-    float intersection_violation{0.0f};
-    float bounds_violation{0.0f};
+    double intersection_violation{0.0};
+    double bounds_violation{0.0};
     float objective{0.0f};
     int intersection_count{0};
 
@@ -134,6 +134,15 @@ void SimulatedAnnealing::apply(
 
     // Compute current score before mutation
     float current_score = problem_->score(solution, global_state);
+    float saved_objective = solution.objective;
+    double saved_intersection_violation = solution.intersection_violation;
+    float saved_bounds_violation = solution.bounds_violation;
+    float precomputed_temperature = compute_temperature(iteration_);
+    bool needs_snapshot = precomputed_temperature <= 0.0f;
+    SolutionEval saved_eval;
+    if (needs_snapshot) {
+        saved_eval = solution;
+    }
 
 #ifndef NDEBUG
     // Save debug copy of full state before mutation
@@ -164,19 +173,33 @@ void SimulatedAnnealing::apply(
     }
 
     bool accept;
-    float temperature, accept_prob;
+    float temperature = precomputed_temperature;
+    float accept_prob;
     if (delta <= 0.0f) {
         accept = true;
-        temperature = -1.0f;
         accept_prob = 1.0f;
         ++n_accepted_;
     } else {
-        temperature = compute_temperature(iteration_);
-        accept_prob = std::min(fast_exp(-delta / temperature), 1.0f);
-        accept = rng.uniform() < accept_prob;
+        if (temperature <= 0.0f) {
+            accept_prob = 0.0f;
+            accept = false;
+        } else {
+            accept_prob = std::min(fast_exp(-delta / temperature), 1.0f);
+            accept = rng.uniform() < accept_prob;
+        }
         if (!accept) {
             // Rollback using checkpoint
             global_state.rollback_to(*problem_, solution, checkpoint);
+            if (needs_snapshot) {
+                solution = saved_eval;
+            } else {
+                solution.objective = saved_objective;
+                solution.intersection_violation = saved_intersection_violation;
+                solution.bounds_violation = saved_bounds_violation;
+                if (temperature <= 0.0f) {
+                    problem_->eval_inplace(solution.solution, solution);
+                }
+            }
 #ifndef NDEBUG
             // Verify solution params match after rollback
             if (!solutions_match(debug_state.solution, solution.solution)) {
@@ -220,6 +243,8 @@ void SimulatedAnnealing::apply(
             ++n_accepted_;
         }
     }
+    last_temperature_ = temperature;
+    last_accept_prob_ = accept_prob;
     last_accept_ = accept;
     last_checkpoint_ = checkpoint;
 

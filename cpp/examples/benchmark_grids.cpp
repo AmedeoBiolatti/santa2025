@@ -37,7 +37,7 @@ int main() {
 
     SolutionEval::IntersectionMap map_fig, map_fig_hash;
     int count_fig = 0, count_fig_hash = 0;
-    float score_fig = 0, score_fig_hash = 0;
+    double score_fig = 0.0, score_fig_hash = 0.0;
 
     double time_fig_full = time_ms([&]() {
         score_fig = constraint.eval(solution, map_fig, &count_fig);

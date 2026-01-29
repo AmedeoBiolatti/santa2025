@@ -83,8 +83,8 @@ inline bool accept_move(
     return false;
 }
 
-inline bool violation_not_worse(float old_v, float new_v) {
-    return new_v <= old_v + 1e-7f;
+inline bool violation_not_worse(double old_v, double new_v) {
+    return new_v <= old_v + 1e-7;
 }
 
 // Fast AABB computation for translated tree (without full figure transform)
@@ -142,8 +142,8 @@ inline bool fast_reject_translation(
     int idx,
     const AABB& old_aabb,
     const Vec2& delta,
-    float current_violation,
-    float tol
+    double current_violation,
+    double tol
 ) {
     // If we have violations, don't fast-reject (move might help resolve them)
     if (current_violation > tol) {
@@ -221,8 +221,8 @@ void SqueezeOptimizer::apply(
 
     BoundsMetrics base_m = metrics_from_eval(solution);
     Vec2 center = base_m.center;
-    const float tol = global_state.tolerance();
-    float base_violation = solution.total_violation();
+    const double tol = global_state.tolerance();
+    double base_violation = solution.total_violation();
 
     auto& base_params = sq_state->base_params;
     auto& scratch_params = sq_state->scratch_params;
@@ -252,7 +252,7 @@ void SqueezeOptimizer::apply(
         return;
     }
 
-    auto try_scale = [&](float sx, float sy, float& obj_out, float& violation_out) -> bool {
+    auto try_scale = [&](float sx, float sy, float& obj_out, double& violation_out) -> bool {
         const size_t count = indices.size();
         for (size_t k = 0; k < count; ++k) {
             TreeParams p = base_params.get(k);
@@ -270,7 +270,7 @@ void SqueezeOptimizer::apply(
 
         problem_->update_and_eval(solution, indices, scratch_params);
 
-        const float new_violation = solution.total_violation();
+        const double new_violation = solution.total_violation();
         bool ok = violation_not_worse(base_violation, new_violation);
         if (base_violation <= tol) {
             ok = ok && (new_violation <= tol);
@@ -290,7 +290,7 @@ void SqueezeOptimizer::apply(
     };
 
     float best_obj = base_m.objective;
-    float best_violation = base_violation;
+    double best_violation = base_violation;
     float best_sx = 1.0f;
     float best_sy = 1.0f;
 
@@ -312,11 +312,11 @@ void SqueezeOptimizer::apply(
             if (cand < min_scale_) break;
             auto [sx, sy] = pack(cand);
             float obj = 0.0f;
-            float violation = 0.0f;
+            double violation = 0.0;
             if (try_scale(sx, sy, obj, violation)) {
                 good = cand;
                 if (base_violation > tol) {
-                    if (violation < best_violation - 1e-7f ||
+                    if (violation < best_violation - 1e-7 ||
                         (violation_not_worse(best_violation, violation) && obj < best_local_obj)) {
                         best_local_obj = obj;
                         best_local_s = cand;
@@ -348,11 +348,11 @@ void SqueezeOptimizer::apply(
             const float mid = 0.5f * (lo + hi);
             auto [sx, sy] = pack(mid);
             float obj = 0.0f;
-            float violation = 0.0f;
+            double violation = 0.0;
             if (try_scale(sx, sy, obj, violation)) {
                 hi = mid;
                 if (base_violation > tol) {
-                    if (violation < best_violation - 1e-7f ||
+                    if (violation < best_violation - 1e-7 ||
                         (violation_not_worse(best_violation, violation) && obj < best_local_obj)) {
                         best_local_obj = obj;
                         best_local_s = mid;
@@ -497,7 +497,7 @@ void CompactionOptimizer::apply(
     }
 
     const int max_iters = std::max(1, iters_per_tree_) * static_cast<int>(indices.size());
-    const float tol = global_state.tolerance();
+    const double tol = global_state.tolerance();
 
     static constexpr float steps[] = {0.02f, 0.008f, 0.003f, 0.001f, 0.0004f};
 
@@ -511,7 +511,7 @@ void CompactionOptimizer::apply(
             for (float st : steps) {
                 for (;;) {
                     const BoundsMetrics old_m = metrics_from_eval(solution);
-                    const float old_violation = solution.total_violation();
+                    const double old_violation = solution.total_violation();
                     const Vec2 center = old_m.center;
                     const Vec2 delta = Vec2{center.x - p.pos.x, center.y - p.pos.y};
                     const float d2 = delta.length_squared();
@@ -604,8 +604,8 @@ inline bool lipschitz_skip_translation(
     int idx,
     float step_size,
     float min_gap,
-    float current_violation,
-    float tol
+    double current_violation,
+    double tol
 ) {
     // If we have violations, don't skip (move might help resolve them)
     if (current_violation > tol) {
@@ -666,7 +666,7 @@ void LocalSearchOptimizer::apply(
     }
 
     const int max_iters = std::max(1, iters_per_tree_) * static_cast<int>(indices.size());
-    const float tol = global_state.tolerance();
+    const double tol = global_state.tolerance();
 
     static constexpr float steps[] = {0.01f, 0.004f, 0.0015f, 0.0006f, 0.00025f, 0.0001f};
     static constexpr float rots_deg[] = {5.0f, 2.0f, 0.8f, 0.3f, 0.1f};
@@ -707,7 +707,7 @@ void LocalSearchOptimizer::apply(
 
                 for (;;) {
                     const BoundsMetrics old_m = metrics_from_eval(solution);
-                    const float old_violation = solution.total_violation();
+                    const double old_violation = solution.total_violation();
                     const Vec2 center = old_m.center;
                     const Vec2 delta = Vec2{center.x - p.pos.x, center.y - p.pos.y};
                     const float d2 = delta.length_squared();
@@ -763,7 +763,7 @@ void LocalSearchOptimizer::apply(
             // 2) pruned 8-dir tiny moves
             {
                 const BoundsMetrics old_m = metrics_from_eval(solution);
-                const float phase2_violation = solution.total_violation();
+                const double phase2_violation = solution.total_violation();
                 const Vec2 center = old_m.center;
                 const Vec2 delta = Vec2{center.x - p.pos.x, center.y - p.pos.y};
                 const AABB& cur_aabb = solution.solution.aabbs()[static_cast<size_t>(idx)];
@@ -805,7 +805,7 @@ void LocalSearchOptimizer::apply(
                         }
 
                         const Vec2 new_pos = Vec2{p.pos.x + step_delta.x, p.pos.y + step_delta.y};
-                        const float old_violation = solution.total_violation();
+                        const double old_violation = solution.total_violation();
                         auto& stack = global_state.update_stack();
                         const size_t checkpoint = global_state.mark_checkpoint();
                         stack.push_update(idx, p);
@@ -858,7 +858,7 @@ void LocalSearchOptimizer::apply(
                             }
 
                             const Vec2 new_pos = Vec2{p.pos.x + step_delta.x, p.pos.y + step_delta.y};
-                            const float old_violation = solution.total_violation();
+                        const double old_violation = solution.total_violation();
                             auto& stack = global_state.update_stack();
                             const size_t checkpoint = global_state.mark_checkpoint();
                             stack.push_update(idx, p);
@@ -898,7 +898,7 @@ void LocalSearchOptimizer::apply(
             // 3) angle tweaks
             {
                 const BoundsMetrics m = metrics_from_eval(solution);
-                const float old_violation = solution.total_violation();
+                const double old_violation = solution.total_violation();
                 const float w = m.max_x - m.min_x;
                 const float h = m.max_y - m.min_y;
                 const float side = std::max(w, h);

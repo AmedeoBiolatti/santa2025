@@ -44,6 +44,17 @@ public:
 
     [[nodiscard]] OptimizerPtr clone() const override;
 
+    [[nodiscard]] float last_temperature() const { return last_temperature_; }
+    [[nodiscard]] float accept_rate() const {
+        float total = static_cast<float>(n_accepted_ + n_rejected_);
+        return total > 0.0f ? static_cast<float>(n_accepted_) / total : 0.0f;
+    }
+    [[nodiscard]] float last_accept_prob() const { return last_accept_prob_; }
+    [[nodiscard]] size_t accepted_count() const { return n_accepted_; }
+    [[nodiscard]] size_t rejected_count() const { return n_rejected_; }
+    [[nodiscard]] int iteration() const { return iteration_; }
+    [[nodiscard]] bool last_accept() const { return last_accept_; }
+
 private:
     OptimizerPtr inner_optimizer_;
     float initial_temp_;
@@ -59,6 +70,8 @@ private:
     size_t last_checkpoint_ = 0;
     size_t n_accepted_ = 0;
     size_t n_rejected_ = 0;
+    float last_temperature_{0.0f};
+    float last_accept_prob_{0.0f};
 
     // Compute temperature based on iteration
     float compute_temperature(int iteration) const;
