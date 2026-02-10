@@ -1,4 +1,4 @@
-# Santa 2025 - The Polytope Permutation Puzzle
+# Santa 2025 - Christmas Tree Packing Challenge
 
 A solution framework for the [Kaggle Santa 2025](https://www.kaggle.com/competitions/santa-2025) tree packing optimization challenge.
 
