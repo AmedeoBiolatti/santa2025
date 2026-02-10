@@ -1,6 +1,6 @@
-# Santa 2024 - The Polytope Permutation Puzzle
+# Santa 2025 - The Polytope Permutation Puzzle
 
-A solution framework for the [Kaggle Santa 2024](https://www.kaggle.com/competitions/santa-2024) tree packing optimization challenge.
+A solution framework for the [Kaggle Santa 2025](https://www.kaggle.com/competitions/santa-2025) tree packing optimization challenge.
 
 ## The Problem
 
